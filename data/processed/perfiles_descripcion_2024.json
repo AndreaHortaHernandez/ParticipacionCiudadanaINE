@@ -1,0 +1,209 @@
+{
+  "objetivo": 2024,
+  "ventana": [
+    2009,
+    2012,
+    2015,
+    2018,
+    2021
+  ],
+  "algoritmo": "kmeans",
+  "k": 5,
+  "features": [
+    "nivel_rel",
+    "caida_intermedia",
+    "tendencia_rel",
+    "volatilidad",
+    "cambio_reciente",
+    "brecha_joven",
+    "pct_jovenes",
+    "edad_media"
+  ],
+  "perfiles": [
+    {
+      "perfil": 0,
+      "nombre": "Baja participación y desmovilización en intermedias",
+      "n_secciones": 19917,
+      "rasgos": [
+        "fuerte caída en elecciones intermedias",
+        "participación por debajo del promedio nacional",
+        "participación muy estable",
+        "población joven"
+      ],
+      "narrativa": "19,917 secciones (29%). Participación media histórica 48.2% (nacional 53.5%; -5.5 pp). En intermedias cae 18.7 pp respecto a presidenciales; los jóvenes de 18-24 participan 7.5 pp menos que el total. Composición: urbana 83%. Rasgos distintivos: fuerte caída en elecciones intermedias; participación por debajo del promedio nacional; participación muy estable; población joven.",
+      "medias": {
+        "nivel_rel": -0.0548,
+        "caida_intermedia": 0.1868,
+        "tendencia_rel": 0.004,
+        "volatilidad": 0.029,
+        "cambio_reciente": -0.0057,
+        "brecha_joven": -0.0752,
+        "pct_jovenes": 0.1546,
+        "edad_media": 42.2302,
+        "participacion_media": 0.4818
+      },
+      "z": {
+        "nivel_rel": -0.676,
+        "caida_intermedia": 0.718,
+        "tendencia_rel": 0.004,
+        "volatilidad": -0.569,
+        "cambio_reciente": -0.234,
+        "brecha_joven": -0.142,
+        "pct_jovenes": 0.345,
+        "edad_media": -0.519
+      },
+      "tipo_seccion": {
+        "M": 0.073,
+        "R": 0.097,
+        "U": 0.831
+      }
+    },
+    {
+      "perfil": 1,
+      "nombre": "Caída brusca reciente",
+      "n_secciones": 9458,
+      "rasgos": [
+        "tendencia a la baja",
+        "caída brusca en la última elección",
+        "participación muy variable entre elecciones",
+        "población joven"
+      ],
+      "narrativa": "9,458 secciones (14%). Participación media histórica 50.6% (nacional 53.5%; -2.9 pp). En intermedias cae 10.4 pp respecto a presidenciales; los jóvenes de 18-24 participan 8.2 pp menos que el total. Composición: urbana 53%, rural 35%, mixta 12%. Rasgos distintivos: tendencia a la baja; caída brusca en la última elección; participación muy variable entre elecciones; población joven.",
+      "medias": {
+        "nivel_rel": -0.0295,
+        "caida_intermedia": 0.104,
+        "tendencia_rel": -0.0386,
+        "volatilidad": 0.0628,
+        "cambio_reciente": -0.0938,
+        "brecha_joven": -0.0817,
+        "pct_jovenes": 0.162,
+        "edad_media": 42.0185,
+        "participacion_media": 0.5061
+      },
+      "z": {
+        "nivel_rel": -0.417,
+        "caida_intermedia": -0.47,
+        "tendencia_rel": -1.42,
+        "volatilidad": 0.591,
+        "cambio_reciente": -1.279,
+        "brecha_joven": -0.277,
+        "pct_jovenes": 0.559,
+        "edad_media": -0.58
+      },
+      "tipo_seccion": {
+        "M": 0.116,
+        "R": 0.351,
+        "U": 0.533
+      }
+    },
+    {
+      "perfil": 2,
+      "nombre": "Población envejecida con participación estable",
+      "n_secciones": 17227,
+      "rasgos": [
+        "población envejecida",
+        "baja proporción de jóvenes 18-24"
+      ],
+      "narrativa": "17,227 secciones (25%). Participación media histórica 55.9% (nacional 53.5%; +2.5 pp). En intermedias cae 14.3 pp respecto a presidenciales; los jóvenes de 18-24 participan 4.9 pp menos que el total. Composición: urbana 74%, rural 21%. Rasgos distintivos: población envejecida; baja proporción de jóvenes 18-24.",
+      "medias": {
+        "nivel_rel": 0.0246,
+        "caida_intermedia": 0.1425,
+        "tendencia_rel": 0.0076,
+        "volatilidad": 0.0365,
+        "cambio_reciente": 0.0273,
+        "brecha_joven": -0.0493,
+        "pct_jovenes": 0.1045,
+        "edad_media": 48.0425,
+        "participacion_media": 0.5593
+      },
+      "z": {
+        "nivel_rel": 0.136,
+        "caida_intermedia": 0.083,
+        "tendencia_rel": 0.125,
+        "volatilidad": -0.312,
+        "cambio_reciente": 0.156,
+        "brecha_joven": 0.401,
+        "pct_jovenes": -1.108,
+        "edad_media": 1.148
+      },
+      "tipo_seccion": {
+        "M": 0.043,
+        "R": 0.213,
+        "U": 0.744
+      }
+    },
+    {
+      "perfil": 3,
+      "nombre": "Repunte reciente con alta volatilidad",
+      "n_secciones": 9430,
+      "rasgos": [
+        "participación muy variable entre elecciones",
+        "tendencia al alza",
+        "repunte en la última elección"
+      ],
+      "narrativa": "9,430 secciones (14%). Participación media histórica 57.6% (nacional 53.5%; +4.1 pp). En intermedias cae 13.6 pp respecto a presidenciales; los jóvenes de 18-24 participan 6.8 pp menos que el total. Composición: rural 46%, urbana 37%, mixta 17%. Rasgos distintivos: participación muy variable entre elecciones; tendencia al alza; repunte en la última elección.",
+      "medias": {
+        "nivel_rel": 0.0412,
+        "caida_intermedia": 0.1356,
+        "tendencia_rel": 0.0499,
+        "volatilidad": 0.0924,
+        "cambio_reciente": 0.1425,
+        "brecha_joven": -0.068,
+        "pct_jovenes": 0.154,
+        "edad_media": 43.4006,
+        "participacion_media": 0.5755
+      },
+      "z": {
+        "nivel_rel": 0.306,
+        "caida_intermedia": -0.017,
+        "tendencia_rel": 1.541,
+        "volatilidad": 1.605,
+        "cambio_reciente": 1.524,
+        "brecha_joven": 0.009,
+        "pct_jovenes": 0.326,
+        "edad_media": -0.183
+      },
+      "tipo_seccion": {
+        "M": 0.173,
+        "R": 0.458,
+        "U": 0.369
+      }
+    },
+    {
+      "perfil": 4,
+      "nombre": "Participación alta consolidada",
+      "n_secciones": 11706,
+      "rasgos": [
+        "participación por encima del promedio nacional",
+        "participación estable entre presidenciales e intermedias"
+      ],
+      "narrativa": "11,706 secciones (17%). Participación media histórica 64.8% (nacional 53.5%; +11.3 pp). En intermedias cae 7.1 pp respecto a presidenciales; los jóvenes de 18-24 participan 7.5 pp menos que el total. Composición: rural 47%, urbana 41%, mixta 12%. Rasgos distintivos: participación por encima del promedio nacional; participación estable entre presidenciales e intermedias.",
+      "medias": {
+        "nivel_rel": 0.113,
+        "caida_intermedia": 0.0705,
+        "tendencia_rel": -0.0047,
+        "volatilidad": 0.0355,
+        "cambio_reciente": 0.012,
+        "brecha_joven": -0.0747,
+        "pct_jovenes": 0.1541,
+        "edad_media": 43.3776,
+        "participacion_media": 0.6483
+      },
+      "z": {
+        "nivel_rel": 1.041,
+        "caida_intermedia": -0.949,
+        "tendencia_rel": -0.285,
+        "volatilidad": -0.344,
+        "cambio_reciente": -0.025,
+        "brecha_joven": -0.132,
+        "pct_jovenes": 0.33,
+        "edad_media": -0.19
+      },
+      "tipo_seccion": {
+        "M": 0.119,
+        "R": 0.472,
+        "U": 0.409
+      }
+    }
+  ]
+}
