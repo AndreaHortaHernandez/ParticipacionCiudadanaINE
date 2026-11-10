@@ -1,0 +1,7 @@
+data/raw/
+data/interim/
+data/geo/
+__pycache__/
+*.pyc
+.venv/
+data/processed/*.parquet

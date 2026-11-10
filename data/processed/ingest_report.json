@@ -1,0 +1,70 @@
+{
+  "filas": 406866,
+  "secciones": 72681,
+  "secciones_en_todas": 62048,
+  "ns_max": 0.5,
+  "por_eleccion": {
+    "2009": {
+      "secciones": 64934,
+      "validas": 63546,
+      "pct_validas": 0.9786,
+      "participacion_nacional": 0.4406,
+      "participacion_mediana_seccion": 0.443
+    },
+    "2012": {
+      "secciones": 65599,
+      "validas": 65484,
+      "pct_validas": 0.9982,
+      "participacion_nacional": 0.6208,
+      "participacion_mediana_seccion": 0.6328
+    },
+    "2015": {
+      "secciones": 68362,
+      "validas": 65328,
+      "pct_validas": 0.9556,
+      "participacion_nacional": 0.4707,
+      "participacion_mediana_seccion": 0.4736
+    },
+    "2018": {
+      "secciones": 68408,
+      "validas": 64865,
+      "pct_validas": 0.9482,
+      "participacion_nacional": 0.6237,
+      "participacion_mediana_seccion": 0.6411
+    },
+    "2021": {
+      "secciones": 68812,
+      "validas": 66455,
+      "pct_validas": 0.9657,
+      "participacion_nacional": 0.5184,
+      "participacion_mediana_seccion": 0.5359
+    },
+    "2024": {
+      "secciones": 70751,
+      "validas": 67550,
+      "pct_validas": 0.9548,
+      "participacion_nacional": 0.5967,
+      "participacion_mediana_seccion": 0.6096
+    }
+  },
+  "en_todas_por_n_validas": {
+    "2": 11,
+    "3": 87,
+    "4": 1070,
+    "5": 9422,
+    "6": 51458
+  },
+  "cartografia": {
+    "disponible": true,
+    "poligonos": 73268,
+    "claves_duplicadas_shp": 0,
+    "match_2009": 0.9644,
+    "match_2012": 0.9666,
+    "match_2015": 0.9703,
+    "match_2018": 0.9701,
+    "match_2021": 0.9813,
+    "match_2024": 0.9936,
+    "match_en_todas": 0.9931,
+    "municipio_coincide_2024": 1.0
+  }
+}
