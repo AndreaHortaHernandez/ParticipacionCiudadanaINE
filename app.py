@@ -57,6 +57,10 @@ def cargar_riesgo(anio: int) -> pd.DataFrame:
                     "participacion_pred", "riesgo", "factor_1", "factor_1_pp", "factor_2",
                     "factor_2_pp", "factor_3", "factor_3_pp", "factor_dominante"] + shap_cols
     r = r[[c for c in cols if c in r.columns]].copy()
+    # Las claves vienen como enteros pequeños (int16): se pasan a int64 para poder combinarlas
+    for c in CLAVE + ["MPIOCVE"]:
+        if c in r.columns:
+            r[c] = r[c].astype("int64")
     r["EDONOM"] = r["EDOCVE"].map(ENTIDADES)
     r["tipo"] = np.select([r.get("rural", 0) == 1, r.get("mixta", 0) == 1], ["rural", "mixta"], "urbana")
 
@@ -74,7 +78,8 @@ def _perfiles() -> pd.DataFrame | None:
     f = _ruta("perfiles_seccion_2024.parquet")
     if not os.path.exists(f):
         return None
-    return pd.read_parquet(f, columns=CLAVE + ["MPIONOM", "perfil", "perfil_nombre"])
+    p = pd.read_parquet(f, columns=CLAVE + ["MPIONOM", "perfil", "perfil_nombre"])
+    return p.astype({c: "int64" for c in CLAVE})
 
 
 def _participacion_real(anio: int) -> pd.DataFrame | None:
@@ -83,7 +88,8 @@ def _participacion_real(anio: int) -> pd.DataFrame | None:
         return None
     p = pd.read_parquet(f, columns=["eleccion"] + CLAVE + ["participacion"],
                         filters=[("eleccion", "==", anio)])
-    return p.drop(columns="eleccion").rename(columns={"participacion": "participacion_real"})
+    p = p.drop(columns="eleccion").astype({c: "int64" for c in CLAVE})
+    return p.rename(columns={"participacion": "participacion_real"})
 
 
 @st.cache_data
@@ -160,7 +166,7 @@ anio = st.sidebar.selectbox(
     format_func=lambda a: f"{a} (pronóstico)" if a > 2024 else f"{a} (backtest, con dato real)")
 datos = cargar_riesgo(anio)
 
-edo_sel = st.sidebar.selectbox("Entidad", [0] + sorted(datos["EDOCVE"].unique()),
+edo_sel = st.sidebar.selectbox("Entidad", [0] + sorted(int(e) for e in datos["EDOCVE"].unique()),
                                format_func=lambda e: "Todo el país" if e == 0 else ENTIDADES.get(e, e))
 vista = datos if edo_sel == 0 else datos[datos["EDOCVE"] == edo_sel]
 mpio_sel = 0
