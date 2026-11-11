@@ -58,15 +58,16 @@ def cargar_riesgo(anio: int) -> pd.DataFrame:
                     "factor_2_pp", "factor_3", "factor_3_pp", "factor_dominante"] + shap_cols
     r = r[[c for c in cols if c in r.columns]].copy()
     # Las claves vienen como enteros pequeños (int16): se pasan a int64 para poder combinarlas
-    for c in CLAVE + ["MPIOCVE"]:
-        if c in r.columns:
-            r[c] = r[c].astype("int64")
+    r = r.astype({c: "int64" for c in CLAVE})
     r["EDONOM"] = r["EDOCVE"].map(ENTIDADES)
     r["tipo"] = np.select([r.get("rural", 0) == 1, r.get("mixta", 0) == 1], ["rural", "mixta"], "urbana")
 
     p = _perfiles()
     if p is not None:
-        r = r.merge(p, on=CLAVE, how="left")
+        r = r.merge(p.rename(columns={"MPIOCVE": "MPIOCVE_perfil"}), on=CLAVE, how="left")
+        r["MPIOCVE"] = r["MPIOCVE"].fillna(r.pop("MPIOCVE_perfil"))
+    # Algunas secciones nuevas no traen municipio: -1 = sin municipio
+    r["MPIOCVE"] = r["MPIOCVE"].fillna(-1).astype("int64")
     real = _participacion_real(anio)
     if real is not None:
         r = r.merge(real, on=CLAVE, how="left")
@@ -78,7 +79,7 @@ def _perfiles() -> pd.DataFrame | None:
     f = _ruta("perfiles_seccion_2024.parquet")
     if not os.path.exists(f):
         return None
-    p = pd.read_parquet(f, columns=CLAVE + ["MPIONOM", "perfil", "perfil_nombre"])
+    p = pd.read_parquet(f, columns=CLAVE + ["MPIOCVE", "MPIONOM", "perfil", "perfil_nombre"])
     return p.astype({c: "int64" for c in CLAVE})
 
 
@@ -219,7 +220,7 @@ with tab_mapa:
         else:
             st.plotly_chart(mapa(agg, geo, "EDOCVE", "riesgo", ["EDONOM", "secciones", "LN"],
                                  "Riesgo medio por entidad (ponderado por lista nominal)"),
-                            use_container_width=True)
+                            width="stretch")
     else:
         geo = cargar_geo(f"secciones_{edo_sel:02d}.geojson")
         df = vista.copy()
@@ -236,14 +237,14 @@ with tab_mapa:
             hover = ["SECCION", "MPIONOM", "riesgo", "factor"] if "MPIONOM" in df else ["SECCION", "riesgo", "factor"]
             st.plotly_chart(mapa(df, geo, "clave", color, hover,
                                  f"{capa} por sección · {ENTIDADES[edo_sel]}", continuo=color == "riesgo"),
-                            use_container_width=True)
+                            width="stretch")
 
-    st.subheader("Secciones con mayor riesgo")
-    top = vista.nlargest(50, "riesgo").copy()
+    st.subheader("Secciones con mayor riesgo (lista nominal ≥ 50)")
+    top = vista[vista["LN_prev"] >= 50].nlargest(50, "riesgo").copy()  # sin secciones diminutas
     top["factor principal"] = top["factor_1"].map(NOMBRE_FACTOR)
     cols = ["EDONOM", "MPIONOM", "SECCION", "tipo", "LN_prev", "riesgo", "factor principal",
             "factor_1_pp", "perfil_nombre", "participacion_real"]
-    st.dataframe(top[[c for c in cols if c in top]], hide_index=True, use_container_width=True,
+    st.dataframe(top[[c for c in cols if c in top]], hide_index=True, width="stretch",
                  column_config={"riesgo": st.column_config.ProgressColumn("riesgo", format="%.2f",
                                                                           min_value=0, max_value=1),
                                 "factor_1_pp": st.column_config.NumberColumn("aporte (pp)", format="%.1f"),
@@ -281,7 +282,7 @@ with tab_sec:
                      color_discrete_map={"aumenta el riesgo": "#c0392b", "reduce el riesgo": "#2e86c1"},
                      title="¿Por qué? Aporte de cada factor al riesgo (puntos porcentuales, SHAP)")
         fig.update_layout(height=420, yaxis_title=None, xaxis_title="pp", legend_title=None)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
         st.subheader("Recomendación del agente")
         rec = recomendar_seccion(fila)
@@ -309,14 +310,14 @@ with tab_perf:
         fig = px.box(vista.dropna(subset=["perfil_nombre"]), x="riesgo", y="perfil_nombre",
                      points=False, title=f"Riesgo {anio} por perfil")
         fig.update_layout(yaxis_title=None, height=380)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
         mezcla = (vista.dropna(subset=["perfil_nombre"])
                   .assign(factor=lambda d: d["factor_dominante"].map(NOMBRE_FACTOR))
                   .groupby(["perfil_nombre", "factor"]).size().rename("secciones").reset_index())
         fig = px.bar(mezcla, x="secciones", y="perfil_nombre", color="factor", orientation="h",
                      title="Factor dominante de riesgo dentro de cada perfil")
         fig.update_layout(yaxis_title=None, height=420, legend_title=None)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
 # --------------------------------------------------------------------------
 # Agente
@@ -351,7 +352,7 @@ with tab_agente:
             fig = px.bar(pm.sort_values("votantes"), x="votantes", y="nombre", orientation="h",
                          hover_data=["acciones", "costo"], title="Votantes adicionales esperados por medida")
             fig.update_layout(yaxis_title=None, height=380)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
         sel = plan[plan["seleccionada"]].copy()
         if "participacion_real" in vista and len(sel):
@@ -367,7 +368,7 @@ with tab_agente:
         sel["entidad"] = sel["EDOCVE"].map(ENTIDADES)
         cols = ["prioridad", "entidad", "SECCION", "medida", "factor", "riesgo", "LN_prev",
                 "ganancia_pp", "votantes", "costo", "utilidad"]
-        st.dataframe(sel[cols].head(1000), hide_index=True, use_container_width=True,
+        st.dataframe(sel[cols].head(1000), hide_index=True, width="stretch",
                      column_config={"riesgo": st.column_config.NumberColumn(format="%.3f"),
                                     "ganancia_pp": st.column_config.NumberColumn("ganancia (pp)", format="%.2f"),
                                     "votantes": st.column_config.NumberColumn(format="%.1f"),
@@ -394,13 +395,13 @@ with tab_modelo:
             t = pd.DataFrame({m: {c: v.get(c) for c in cols} for m, v in bloque.items()
                               if isinstance(v, dict)}).T
             st.markdown(f"**{nombre.replace('_', ' ').capitalize()}**")
-            st.dataframe(t, use_container_width=True)
+            st.dataframe(t, width="stretch")
         imp = met.get("importancia_factores_2024")
         if imp:
             s = pd.Series(imp).rename(index=NOMBRE_FACTOR).sort_values()
             fig = px.bar(s, orientation="h", title="Importancia por factor (pp medio de |SHAP|, 2024)")
             fig.update_layout(showlegend=False, yaxis_title=None, xaxis_title="pp", height=420)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
         st.caption("MAE en puntos porcentuales; spearman = correlación de rangos entre riesgo "
                    "predicho y real; precision_top10 = fracción del 10% de secciones con mayor riesgo real "
                    "que captura el 10% de mayor riesgo predicho.")
