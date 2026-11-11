@@ -7,3 +7,4 @@ __pycache__/
 data/processed/*.parquet
 *.joblib
 data/processed/riesgo_metricas.json
+data/processed/geo/
