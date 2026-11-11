@@ -72,6 +72,14 @@ def cargar_riesgo(anio: int) -> pd.DataFrame:
     if real is not None:
         r = r.merge(real, on=CLAVE, how="left")
     r["clave"] = r["EDOCVE"] * 100000 + r["SECCION"]
+    # Sin pd.NA ni tipos "nullable": Plotly/Streamlit no los serializan (TypeError NAType)
+    for c in r.columns:
+        if c.startswith("factor_") and not c.endswith("_pp") or c == "factor_dominante":
+            r[c] = r[c].astype(object).where(r[c].notna(), "ninguno").astype(str)
+        elif c in ("MPIONOM", "perfil_nombre"):
+            r[c] = r[c].astype(object).where(r[c].notna(), "Sin dato").astype(str)
+        elif pd.api.types.is_numeric_dtype(r[c]) and c not in CLAVE + ["MPIOCVE", "clave"]:
+            r[c] = r[c].astype("float64")
     return r
 
 
@@ -172,10 +180,12 @@ edo_sel = st.sidebar.selectbox("Entidad", [0] + sorted(int(e) for e in datos["ED
 vista = datos if edo_sel == 0 else datos[datos["EDOCVE"] == edo_sel]
 mpio_sel = 0
 if edo_sel and "MPIONOM" in vista:
-    mpios = vista[["MPIOCVE", "MPIONOM"]].dropna().drop_duplicates().sort_values("MPIONOM")
-    mpio_sel = st.sidebar.selectbox("Municipio", [0] + mpios["MPIOCVE"].tolist(),
+    # Un nombre por municipio (el más frecuente con dato); -1 = sin municipio
+    m_ = vista.loc[(vista["MPIOCVE"] > 0) & (vista["MPIONOM"] != "Sin dato"), ["MPIOCVE", "MPIONOM"]]
+    nombres = m_.groupby("MPIOCVE")["MPIONOM"].agg(lambda s: s.mode().iat[0]).sort_values()
+    mpio_sel = st.sidebar.selectbox("Municipio", [0] + [int(m) for m in nombres.index],
                                     format_func=lambda m: "Todos" if m == 0 else
-                                    mpios.set_index("MPIOCVE")["MPIONOM"].get(m, m))
+                                    str(nombres.get(m, f"Municipio {m}")))
     if mpio_sel:
         vista = vista[vista["MPIOCVE"] == mpio_sel]
 
@@ -307,11 +317,11 @@ with tab_perf:
         for p in desc["perfiles"]:
             with st.expander(f"**{p['nombre']}** · {p['n_secciones']:,} secciones"):
                 st.write(p["narrativa"])
-        fig = px.box(vista.dropna(subset=["perfil_nombre"]), x="riesgo", y="perfil_nombre",
+        fig = px.box(vista[vista["perfil_nombre"] != "Sin dato"], x="riesgo", y="perfil_nombre",
                      points=False, title=f"Riesgo {anio} por perfil")
         fig.update_layout(yaxis_title=None, height=380)
         st.plotly_chart(fig, width="stretch")
-        mezcla = (vista.dropna(subset=["perfil_nombre"])
+        mezcla = (vista[vista["perfil_nombre"] != "Sin dato"]
                   .assign(factor=lambda d: d["factor_dominante"].map(NOMBRE_FACTOR))
                   .groupby(["perfil_nombre", "factor"]).size().rename("secciones").reset_index())
         fig = px.bar(mezcla, x="secciones", y="perfil_nombre", color="factor", orientation="h",
