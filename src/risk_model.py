@@ -241,8 +241,10 @@ def modelo_hgb(**kw):
 
 GRID = {
     "lineal": [{"alpha": a} for a in (0.1, 1.0, 10.0, 100.0)],
-    "random_forest": [{"min_samples_leaf": m, "max_features": f}
-                      for m in (10, 50) for f in (0.33, 0.6)],
+    # Random Forest se deja fuera de la búsqueda: en validación 2021 fue peor que el
+    # lineal (MAE 7.02-7.25 vs 6.83) y agota la RAM de Colab. Para incluirlo:
+    # "random_forest": [{"min_samples_leaf": m, "max_features": f}
+    #                   for m in (10, 50) for f in (0.33, 0.6)],
     "gradient_boosting": [{"learning_rate": lr, "max_leaf_nodes": l, "min_samples_leaf": m}
                           for lr in (0.05, 0.1) for l in (31, 63) for m in (50, 200)],
 }
@@ -313,8 +315,8 @@ def _precision_top(y: np.ndarray, yhat: np.ndarray, q: float) -> float:
 # --------------------------------------------------------------------------
 # Candidatos: modelos base y ensambles (definidos de antemano)
 # --------------------------------------------------------------------------
-ENSAMBLES = {"ens_lineal_gb": ("lineal", "gradient_boosting"),
-             "ens_3": ("lineal", "random_forest", "gradient_boosting")}
+ENSAMBLES = {"ens_lineal_gb": ("lineal", "gradient_boosting")}
+# Con Random Forest en GRID se puede añadir: "ens_3": ("lineal", "random_forest", "gradient_boosting")
 CANDIDATOS = list(GRID) + list(ENSAMBLES)
 
 
