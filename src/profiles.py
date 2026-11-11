@@ -71,11 +71,11 @@ def participacion_nacional(panel: pd.DataFrame) -> pd.Series:
     return g.SV / (g.SV + g.NV)
 
 
-def indicadores(panel: pd.DataFrame, objetivo: int) -> pd.DataFrame:
+def indicadores(panel: pd.DataFrame, objetivo: int, min_elecciones: int = 3) -> pd.DataFrame:
     """Indicadores por sección usando solo elecciones < objetivo."""
     ventana = [y for y in ELECCIONES if y < objetivo]
-    if len(ventana) < 3:
-        raise ValueError("Se requieren al menos 3 elecciones previas")
+    if len(ventana) < min_elecciones:
+        raise ValueError(f"Se requieren al menos {min_elecciones} elecciones previas")
     p = panel[panel.eleccion.isin(ventana)].copy()
     nac = participacion_nacional(p)
     p["rel"] = p["participacion"] - p["eleccion"].map(nac)
@@ -111,7 +111,7 @@ def indicadores(panel: pd.DataFrame, objetivo: int) -> pd.DataFrame:
         res = R.copy()
         for cols in (pres_cols, int_cols):
             res[:, cols] = R[:, cols] - np.nanmean(R[:, cols], 1, keepdims=True)
-        out["volatilidad"] = np.nanstd(res, 1)
+        out["volatilidad"] = np.where(n_val >= 3, np.nanstd(res, 1), np.nan)
 
         # Cambio reciente: última elección válida vs media de las anteriores
         last_idx = np.where(ok, np.arange(len(ventana))[None, :], -1).max(1)

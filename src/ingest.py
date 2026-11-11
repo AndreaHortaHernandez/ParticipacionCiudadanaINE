@@ -32,7 +32,8 @@ GEO_SECCION = os.path.join(ROOT, "data", "geo", "SECCION", "SECCIONES_26", "SECC
 
 ELECCIONES = [2009, 2012, 2015, 2018, 2021, 2024]
 TIPO_ELECCION = {2009: "intermedia", 2012: "presidencial", 2015: "intermedia",
-                 2018: "presidencial", 2021: "intermedia", 2024: "presidencial"}
+                 2018: "presidencial", 2021: "intermedia", 2024: "presidencial",
+                 2027: "intermedia"}  # 2027: elección futura (solo pronóstico)
 NS_MAX = 0.5          # umbral de registros no especificados para considerar válida la participación
 EDAD_MAX = 100        # edades > EDAD_MAX se consideran error de padrón para la estructura etaria
 GRUPOS_EDAD = {"18_24": (18, 24), "25_34": (25, 34), "35_49": (35, 49),
