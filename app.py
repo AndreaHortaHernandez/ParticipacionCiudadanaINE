@@ -14,7 +14,9 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from src.agent import CATALOGO, candidatas, planificar, recomendar_seccion, resumen
+from src.agent import (CATALOGO, CAUSAS, FACTOR_ESTATAL, FACTORES_BASE, INERCIA,
+                       RECOMENDACION_ESTATAL, candidatas, causas, planificar,
+                       recomendacion_estatal, recomendar_seccion, resumen)
 from src.ingest import CLAVE, PROC_DIR
 from src.risk_model import DESCRIPCION_FACTOR, GRUPOS
 
@@ -30,12 +32,13 @@ ENTIDADES = {
     30: "Veracruz", 31: "Yucatán", 32: "Zacatecas",
 }
 NOMBRE_FACTOR = {
-    "historial_bajo": "Historial bajo", "desmovilizacion_intermedias": "Desmovilización en intermedias",
+    "historial_bajo": "Historial de la sección", "desmovilizacion_intermedias": "Desmovilización en intermedias",
     "caida_reciente": "Caída reciente", "volatilidad": "Volatilidad", "jovenes": "Jóvenes",
     "envejecimiento": "Estructura de edad", "genero": "Brecha de género",
-    "territorio_acceso": "Territorio / acceso", "contexto_municipal": "Contexto municipal",
-    "contexto_estatal": "Contexto estatal", "concurrencia_local": "Sin concurrencia local",
-    "calidad_dato": "Calidad del dato", "ninguno": "Ninguno",
+    "territorio_acceso": "Tipo de sección y crecimiento del padrón", "contexto_municipal": "Contexto municipal",
+    "contexto_estatal": "Contexto estatal", "concurrencia_local": "Menos elecciones locales concurrentes",
+    "calidad_dato": "Calidad del dato", "ninguno": "Ninguno", "ninguna": "Ninguna",
+    INERCIA: "Baja participación crónica (causa por identificar)",
 }
 NOMBRE_MEDIDA = {m: d["nombre"] for m, d in CATALOGO.items()}
 
@@ -149,11 +152,12 @@ def cargar_riesgo(anio: int) -> pd.DataFrame:
     real = _participacion_real(anio)
     if real is not None:
         r = r.merge(real, on=CLAVE, how="left")
+    r = r.join(causas(r))  # causa atendible principal y nivel base (ver src/agent.py)
     r["clave"] = r["EDOCVE"] * 100000 + r["SECCION"]
     # Sin pd.NA ni tipos "nullable": Plotly/Streamlit no los serializan (TypeError NAType)
     for c in r.columns:
-        if c.startswith("factor_") and not c.endswith("_pp") or c == "factor_dominante":
-            r[c] = r[c].astype(object).where(r[c].notna(), "ninguno").astype(str)
+        if (c.startswith(("factor_", "causa_")) and not c.endswith("_pp")) or c == "factor_dominante":
+            r[c] = r[c].astype(object).where(r[c].notna(), "ninguna").astype(str)
         elif c in ("MPIONOM", "perfil_nombre"):
             r[c] = r[c].astype(object).where(r[c].notna(), "Sin dato").astype(str)
         elif pd.api.types.is_numeric_dtype(r[c]) and c not in CLAVE + ["MPIOCVE", "clave"]:
@@ -319,12 +323,18 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
     n_alto = int((v["nivel"] == "Alto").sum())
     plan, res = _plan_zona(anio, edo, mpio, PRESUPUESTO_RESULTADOS)
 
-    # Causas: aporte positivo medio de cada factor al riesgo (pp, ponderado por LN)
-    shap_cols = [c for c in v.columns if c.startswith("shap_")]
-    causas = pd.Series({NOMBRE_FACTOR.get(c[5:], c[5:]):
-                        np.average(v[c].clip(lower=0).fillna(0) * 100, weights=v["LN_prev"].fillna(0) + 1e-9)
-                        for c in shap_cols}).sort_values(ascending=False)
-    causa1 = causas.index[0] if len(causas) else "—"
+    # Causas atendibles: aporte positivo medio (pp, ponderado por LN). El nivel base
+    # (historial y contexto) se reporta aparte: dice cuánto riesgo hay, no por qué.
+    w = v["LN_prev"].fillna(0) + 1e-9
+
+    def _aporte(f):
+        col = f"shap_{f}"
+        return float(np.average(v[col].clip(lower=0).fillna(0) * 100, weights=w)) if col in v else 0.0
+    aportes = pd.Series({NOMBRE_FACTOR.get(f, f): _aporte(f) for f in CAUSAS}).sort_values(ascending=False)
+    base_pp = sum(_aporte(f) for f in FACTORES_BASE)
+    estatal_pp = _aporte(FACTOR_ESTATAL)
+    causa1 = aportes.index[0] if len(aportes) and aportes.iloc[0] > 0 else "—"
+    estados_conc = recomendacion_estatal(v)
 
     st.subheader(f"Resultados · {zona} · elección {anio}")
 
@@ -333,8 +343,12 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
     texto = (f"En <b>{zona}</b> se analizaron <b>{len(v):,} secciones</b> con <b>{ln:,.0f} electores</b>. "
              f"Para {anio} se esperan <b>{abst:,.0f} abstencionistas</b> (riesgo medio "
              f"<b>{riesgo_zona:.1%}</b>, {comp} que el promedio nacional de {riesgo_pais:.1%}). "
-             f"<b>{n_alto:,}</b> secciones ({n_alto / len(v):.0%}) están en <b>riesgo alto</b>. "
-             f"La causa que más eleva el riesgo es <b>{causa1.lower()}</b>.")
+             f"<b>{n_alto:,}</b> {'sección está' if n_alto == 1 else 'secciones están'} ({n_alto / len(v):.0%}) en <b>riesgo alto</b>. "
+             f"Más allá de su historial, la causa que más eleva el riesgo es <b>{causa1.lower()}</b>.")
+    if len(estados_conc):
+        nombres_e = ", ".join(ENTIDADES[int(e)] for e in estados_conc["EDOCVE"])
+        texto += (f" Además, en <b>{nombres_e}</b> habrá menos elecciones locales el mismo día que en la anterior, lo que "
+                  f"eleva el riesgo ≈{estados_conc['aporte_pp'].mean():.1f} pp: conviene una campaña con el OPLE.")
     if res:
         top_med = res["por_medida"][0]["nombre"] if res["por_medida"] else "—"
         texto += (f" Con un presupuesto del {PRESUPUESTO_RESULTADOS}%, el agente propone "
@@ -370,17 +384,22 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
 
     # ---- Causas
     st.markdown("#### ¿Por qué? Causas del riesgo")
+    st.caption(f"El historial y el contexto de la zona explican en promedio {base_pp:.1f} pp del riesgo "
+               "(nivel base). Abajo, las causas sobre las que sí se puede actuar.")
     a, b = st.columns(2)
-    c = causas[causas > 0].sort_values().tail(8).reset_index()
-    c.columns = ["factor", "pp"]
-    f1 = px.bar(c, x="pp", y="factor", orientation="h", color_discrete_sequence=[PALETA["primario"]],
-                title="Aporte medio al riesgo (puntos porcentuales, SHAP)")
+    c = aportes[aportes > 0].sort_values().reset_index()
+    c.columns = ["causa", "pp"]
+    if estatal_pp > 0:
+        c = pd.concat([pd.DataFrame({"causa": ["Menos elecciones locales concurrentes (estatal)"], "pp": [estatal_pp]}), c])
+        c = c.sort_values("pp")
+    f1 = px.bar(c, x="pp", y="causa", orientation="h", color_discrete_sequence=[PALETA["primario"]],
+                title="Aporte medio de cada causa al riesgo (pp, SHAP)")
     f1.update_layout(yaxis_title=None, xaxis_title="pp")
     a.plotly_chart(_fig(f1), width="stretch")
-    fd = v["factor_dominante"].map(NOMBRE_FACTOR).value_counts().head(8).reset_index()
-    fd.columns = ["factor", "secciones"]
-    b.plotly_chart(_fig(px.pie(fd, names="factor", values="secciones", hole=0.45,
-                               title="Factor dominante en cada sección")), width="stretch")
+    fd = v["causa_principal"].map(NOMBRE_FACTOR).value_counts().head(8).reset_index()
+    fd.columns = ["causa", "secciones"]
+    b.plotly_chart(_fig(px.pie(fd, names="causa", values="secciones", hole=0.45,
+                               title="Causa principal en cada sección")), width="stretch")
 
     # ---- Quiénes
     st.markdown("#### ¿Dónde y en quiénes?")
@@ -421,6 +440,10 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
             a.plotly_chart(_fig(f4, 400), width="stretch")
             b.plotly_chart(_fig(px.pie(pm, names="nombre", values="costo", hole=0.5,
                                        title="Reparto del presupuesto"), 400), width="stretch")
+        if len(estados_conc):
+            st.markdown("**Recomendación estatal:** " + RECOMENDACION_ESTATAL + " Entidades: "
+                        + ", ".join(f"{ENTIDADES[int(e)]} (+{pp:.1f} pp)"
+                                    for e, pp in zip(estados_conc["EDOCVE"], estados_conc["aporte_pp"])) + ".")
         sel = plan[plan["seleccionada"]].head(15).copy()
         sel["Medida"] = sel["medida"].map(NOMBRE_MEDIDA)
         sel["Causa que atiende"] = sel["factor"].map(NOMBRE_FACTOR)
@@ -460,13 +483,21 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
             "**Pasos:** 1) limpieza e integración por sección · 2) perfiles de votante (K‑Means) · "
             f"3) modelo de riesgo (`{met.get('modelo_elegido', '—')}`) validado con elecciones pasadas · "
             "4) explicación por factor (SHAP) · 5) agente que elige medidas por utilidad/costo.")
-        filas = [{"Factor": NOMBRE_FACTOR.get(g, g), "Qué mide": DESCRIPCION_FACTOR.get(g, ""),
+        def _tipo(g):
+            if g in FACTORES_BASE:
+                return "Nivel base (cuánto riesgo)"
+            if g == FACTOR_ESTATAL:
+                return "Contexto estatal → recomendación OPLE"
+            return "Causa atendible → medida por sección"
+        filas = [{"Factor": NOMBRE_FACTOR.get(g, g), "Tipo": _tipo(g), "Qué mide": DESCRIPCION_FACTOR.get(g, ""),
+                  "Medida": next((d["nombre"] for d in CATALOGO.values() if d["factor"] == g), "—"),
                   "Variables": ", ".join(vs)} for g, vs in GRUPOS.items()]
         st.dataframe(pd.DataFrame(filas), hide_index=True, width="stretch")
 
     # ---- Descarga
     salida = v[[c for c in ["EDONOM", "MPIONOM", "SECCION", "tipo", "LN_prev", "riesgo", "nivel",
-                            "factor_1", "factor_2", "perfil_nombre", "participacion_real"] if c in v]]
+                            "causa_1", "causa_2", "perfil_nombre", "participacion_real"] if c in v]]
+    salida = salida.assign(**{c: salida[c].map(NOMBRE_FACTOR) for c in ("causa_1", "causa_2") if c in salida})
     st.download_button("⬇️ Descargar resultados de la zona (CSV)", salida.to_csv(index=False).encode("utf-8"),
                        f"resultados_{anio}_{zona.replace(' ', '_')}.csv", "text/csv")
 
@@ -533,7 +564,7 @@ with tab_res:
 # Mapa
 # --------------------------------------------------------------------------
 with tab_mapa:
-    capa = st.radio("Colorear por", ["Riesgo", "Factor dominante", "Perfil"], horizontal=True)
+    capa = st.radio("Colorear por", ["Riesgo", "Causa principal", "Perfil"], horizontal=True)
     if edo_sel == 0:
         geo = cargar_geo("entidades.geojson")
         agg = (datos.assign(_w=datos["riesgo"] * datos["LN_prev"])
@@ -553,8 +584,8 @@ with tab_mapa:
     else:
         geo = cargar_geo(f"secciones_{edo_sel:02d}.geojson")
         df = vista.copy()
-        df["factor"] = df["factor_dominante"].map(NOMBRE_FACTOR)
-        color = {"Riesgo": "riesgo", "Factor dominante": "factor", "Perfil": "perfil_nombre"}[capa]
+        df["factor"] = df["causa_principal"].map(NOMBRE_FACTOR)
+        color = {"Riesgo": "riesgo", "Causa principal": "factor", "Perfil": "perfil_nombre"}[capa]
         if color not in df:
             st.warning("No hay perfiles cargados (perfiles_seccion_2024.parquet).")
         elif geo is None:
@@ -570,13 +601,13 @@ with tab_mapa:
 
     st.subheader("Secciones con mayor riesgo (lista nominal ≥ 50)")
     top = vista[vista["LN_prev"] >= 50].nlargest(50, "riesgo").copy()  # sin secciones diminutas
-    top["factor principal"] = top["factor_1"].map(NOMBRE_FACTOR)
-    cols = ["EDONOM", "MPIONOM", "SECCION", "tipo", "LN_prev", "riesgo", "factor principal",
-            "factor_1_pp", "perfil_nombre", "participacion_real"]
+    top["causa principal"] = top["causa_principal"].map(NOMBRE_FACTOR)
+    cols = ["EDONOM", "MPIONOM", "SECCION", "tipo", "LN_prev", "riesgo", "causa principal",
+            "causa_1_pp", "perfil_nombre", "participacion_real"]
     st.dataframe(top[[c for c in cols if c in top]], hide_index=True, width="stretch",
                  column_config={"riesgo": st.column_config.ProgressColumn("riesgo", format="%.2f",
                                                                           min_value=0, max_value=1),
-                                "factor_1_pp": st.column_config.NumberColumn("aporte (pp)", format="%.1f"),
+                                "causa_1_pp": st.column_config.NumberColumn("aporte (pp)", format="%.1f"),
                                 "LN_prev": st.column_config.NumberColumn("lista nominal", format="%d")})
 
 # --------------------------------------------------------------------------
@@ -606,9 +637,13 @@ with tab_sec:
         shap = {k[5:]: v * 100 for k, v in fila.items() if k.startswith("shap_") and pd.notna(v)}
         s = (pd.DataFrame({"factor": [NOMBRE_FACTOR.get(k, k) for k in shap], "pp": list(shap.values())})
              .sort_values("pp"))
-        s["sentido"] = np.where(s["pp"] > 0, "aumenta el riesgo", "reduce el riesgo")
+        base_n = {NOMBRE_FACTOR.get(f, f) for f in FACTORES_BASE}
+        s["sentido"] = np.select([s["pp"] <= 0, s["factor"].isin(base_n)],
+                                 ["reduce el riesgo", "nivel base (historial/contexto)"], "causa que eleva el riesgo")
         fig = px.bar(s, x="pp", y="factor", color="sentido", orientation="h",
-                     color_discrete_map={"aumenta el riesgo": PALETA["primario"], "reduce el riesgo": PALETA["bajo"]},
+                     color_discrete_map={"causa que eleva el riesgo": PALETA["primario"],
+                                         "nivel base (historial/contexto)": PALETA["secundario"],
+                                         "reduce el riesgo": PALETA["bajo"]},
                      title="¿Por qué? Aporte de cada factor al riesgo (puntos porcentuales, SHAP)")
         fig.update_layout(height=420, yaxis_title=None, xaxis_title="pp", legend_title=None)
         st.plotly_chart(fig, width="stretch")
@@ -619,7 +654,7 @@ with tab_sec:
             st.success("Ningún factor eleva el riesgo de esta sección: no se recomienda intervención.")
         for r_ in rec:
             st.markdown(
-                f"- **{r_['nombre']}** — atiende *{DESCRIPCION_FACTOR.get(r_['factor'], r_['factor'])}* "
+                f"- **{r_['nombre']}** — atiende *{NOMBRE_FACTOR.get(r_['factor'], r_['factor']).lower()}* "
                 f"(aporta {r_['contribucion_pp']:.1f} pp)"
                 + (f"; efecto supuesto ≈ +{r_['ganancia_pp']:.1f} pp" if r_.get("ganancia_pp") else ""))
 
@@ -641,10 +676,10 @@ with tab_perf:
         fig.update_layout(yaxis_title=None, height=380)
         st.plotly_chart(fig, width="stretch")
         mezcla = (vista[vista["perfil_nombre"] != "Sin dato"]
-                  .assign(factor=lambda d: d["factor_dominante"].map(NOMBRE_FACTOR))
+                  .assign(factor=lambda d: d["causa_principal"].map(NOMBRE_FACTOR))
                   .groupby(["perfil_nombre", "factor"]).size().rename("secciones").reset_index())
         fig = px.bar(mezcla, x="secciones", y="perfil_nombre", color="factor", orientation="h",
-                     title="Factor dominante de riesgo dentro de cada perfil")
+                     title="Causa principal de riesgo dentro de cada perfil")
         fig.update_layout(yaxis_title=None, height=420, legend_title=None)
         st.plotly_chart(fig, width="stretch")
 
