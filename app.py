@@ -12,6 +12,7 @@ import os
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from src.agent import (CATALOGO, CAUSAS, FACTOR_ESTATAL, FACTORES_BASE, INERCIA,
@@ -98,6 +99,15 @@ st.markdown(f"""
   div[data-testid="stMetric"] * {{ color:#FFFFFF !important; justify-content:center; }}
   div[data-testid="stMetricValue"] {{ font-weight:700; }}
 
+  /* Navegación principal como pestañas */
+  div.st-key-vista div[role="radiogroup"] {{
+      gap:6px; border-bottom:2px solid {PALETA['lavanda_media']}; padding-bottom:6px; }}
+  div.st-key-vista label {{ background:{PALETA['lavanda']}; border-radius:18px 18px 0 0; padding:6px 14px !important;
+      margin-right:4px; }}
+  div.st-key-vista label:has(input:checked) {{ background:{PALETA['secundario']}; }}
+  div.st-key-vista label:has(input:checked) p {{ color:#FFFFFF !important; }}
+  div.st-key-vista label p {{ color:{PALETA['secundario']}; font-weight:600; }}
+  div.st-key-vista label > div:first-child {{ display:none; }}
   /* Pestañas */
   button[data-baseweb="tab"] p {{ font-size:1rem; font-weight:600; color:{PALETA['secundario']}; }}
   button[data-baseweb="tab"][aria-selected="true"] p {{ color:{PALETA['primario']}; }}
@@ -192,7 +202,7 @@ def cargar_json(nombre: str) -> dict | None:
         return json.load(fh)
 
 
-@st.cache_data(show_spinner="Cargando cartografía…")
+@st.cache_resource(show_spinner="Cargando cartografía…")
 def cargar_geo(nombre: str) -> dict | None:
     f = os.path.join(GEO_DIR, nombre)
     if not os.path.exists(f):
@@ -214,23 +224,67 @@ def pond(df: pd.DataFrame, col: str, peso: str = "LN_prev") -> float:
 ALTO_MAPA = 640
 
 
-def mapa(df, geo, clave, color, hover, titulo, continuo=True):
-    """Coroplético encuadrado a las geometrías mostradas (zoom al estado o municipio)."""
+@st.cache_resource(show_spinner="Preparando el mapa…", max_entries=12)
+def geo_zona(anio: int, edo: int, mpio: int):
+    """Geometrías de las secciones de la zona + encuadre (centro, zoom). Se calcula una vez."""
+    geo = cargar_geo(f"secciones_{edo:02d}.geojson")
+    if geo is None:
+        return None, None, None
+    r = cargar_riesgo(anio)
+    m = r["EDOCVE"] == edo
+    if mpio:
+        m &= r["MPIOCVE"] == mpio
+    claves = set(r.loc[m, "clave"].tolist())
+    g = {"type": "FeatureCollection",
+         "features": [f for f in geo["features"] if f["properties"]["clave"] in claves]}
+    centro, zoom = _encuadre(g, ancho_px=1100, alto_px=ALTO_MAPA - 40)
+    return g, centro, zoom
+
+
+@st.cache_resource
+def geo_pais():
+    geo = cargar_geo("entidades.geojson")
+    if geo is None:
+        return None, None, None
     centro, zoom = _encuadre(geo, ancho_px=1100, alto_px=ALTO_MAPA - 40)
-    kw = dict(geojson=geo, locations=clave, featureidkey=f"properties.{clave}", color=color,
-              hover_name=hover[0], hover_data=hover[1:], center=centro, zoom=zoom,
-              opacity=0.8, title=titulo)
+    return geo, centro, zoom
+
+
+def mapa(df, geo, centro, zoom, clave, color, hover, titulo, continuo=True):
+    """Coroplético en UNA sola capa: la geometría se envía una vez aunque el color
+    sea por categorías (px crea una capa por categoría y repite toda la geometría)."""
+    Traza = getattr(go, "Choroplethmap", None)
+    nuevo = Traza is not None
+    Traza = Traza or go.Choroplethmapbox
+    etiquetas = {"SECCION": "Sección", "MPIONOM": "Municipio", "riesgo": "Riesgo",
+                 "factor": "Causa principal", "EDONOM": "Entidad", "secciones": "Secciones",
+                 "LN": "Lista nominal", "perfil_nombre": "Perfil"}
+    cd = pd.DataFrame({h: (df[h].map(lambda x: f"{x:.1%}") if h == "riesgo" else
+                           df[h].map(lambda x: f"{x:,.0f}") if h in ("LN", "secciones") else df[h].astype(str))
+                       for h in hover})
+    plantilla = f"<b>{etiquetas.get(hover[0], hover[0])} %{{customdata[0]}}</b><br>" + "<br>".join(
+        f"{etiquetas.get(h, h)}: %{{customdata[{i}]}}" for i, h in enumerate(hover) if i > 0) + "<extra></extra>"
     if continuo:
-        kw.update(color_continuous_scale=ESCALA_RIESGO)
+        z = df[color].astype(float)
+        escala = [[i / (len(ESCALA_RIESGO) - 1), c] for i, c in enumerate(ESCALA_RIESGO)]
+        extra = dict(colorbar=dict(title="Riesgo", tickformat=".0%"))
     else:
-        kw.update(color_discrete_sequence=SECUENCIA)
-    fn = getattr(px, "choropleth_map", None)
-    if fn is not None:
-        fig = fn(df, map_style="carto-positron", **kw)
-    else:
-        fig = px.choropleth_mapbox(df, mapbox_style="carto-positron", **kw)
-    fig.update_traces(marker_line_width=0.4, marker_line_color="#FFFFFF")
-    fig.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=ALTO_MAPA,
+        cats = sorted(df[color].astype(str).unique())
+        n = max(len(cats), 1)
+        z = df[color].astype(str).map({c: i for i, c in enumerate(cats)})
+        escala = []
+        for i in range(n):
+            col = SECUENCIA[i % len(SECUENCIA)]
+            escala += [[i / n, col], [(i + 1) / n, col]]
+        extra = dict(zmin=-0.5, zmax=n - 0.5,
+                     colorbar=dict(tickvals=list(range(n)), ticktext=cats, title=None, len=0.9))
+    fig = go.Figure(Traza(geojson=geo, locations=df[clave], featureidkey=f"properties.{clave}", z=z,
+                          colorscale=escala, marker_opacity=0.8, marker_line_width=0.4,
+                          marker_line_color="#FFFFFF", customdata=cd.to_numpy(),
+                          hovertemplate=plantilla, **extra))
+    capa = dict(style="carto-positron", center=centro, zoom=zoom)
+    fig.update_layout(**({"map": capa} if nuevo else {"mapbox": capa}))
+    fig.update_layout(margin=dict(l=0, r=0, t=40, b=0), height=ALTO_MAPA, title=titulo,
                       font=dict(family=FUENTE, color=PALETA["texto"]),
                       title_font=dict(size=16, color=PALETA["primario"]))
     return fig
@@ -275,6 +329,7 @@ def _fig(fig, alto=360):
     return fig
 
 
+@st.cache_data(show_spinner="El agente arma la estrategia…", max_entries=32)
 def _plan_zona(anio: int, edo: int, mpio: int, pct: float) -> tuple[pd.DataFrame, dict]:
     cand = cargar_candidatas(anio)
     if edo:
@@ -374,8 +429,12 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
     a.plotly_chart(_fig(px.pie(niv, names="nivel", values="secciones", hole=0.55, color="nivel",
                                color_discrete_map=COLOR_NIVEL,
                                title="Secciones por nivel de riesgo (umbral: país)")), width="stretch")
-    h = px.histogram(v, x="riesgo", nbins=40, title="Distribución del riesgo de abstención",
-                     color_discrete_sequence=[PALETA["primario"]])
+    cnt, bordes = np.histogram(v["riesgo"].dropna(), bins=40)
+    hd = pd.DataFrame({"riesgo": (bordes[:-1] + bordes[1:]) / 2, "secciones": cnt})
+    h = px.bar(hd, x="riesgo", y="secciones", title="Distribución del riesgo de abstención",
+               color_discrete_sequence=[PALETA["primario"]])
+    h.update_traces(marker_line_width=0)
+    h.update_layout(bargap=0.02)
     h.add_vline(x=riesgo_pais, line_dash="dash", line_color=PALETA["secundario"],
                 annotation_text="promedio nacional")
     h.update_xaxes(tickformat=".0%", title="riesgo")
@@ -554,19 +613,20 @@ if "participacion_real" in vista:
 else:
     c4.metric("Abstenc. esperada (personas)", f"{(vista['riesgo'] * vista['LN_prev']).sum():,.0f}")
 
-tab_res, tab_mapa, tab_sec, tab_perf, tab_agente, tab_modelo = st.tabs(
-    ["📊 Resultados", "🗺️ Mapa", "📍 Sección", "👥 Perfiles", "🤖 Agente de intervención", "⚙️ Modelo"])
+# Navegación: a diferencia de st.tabs, solo se calcula y envía la vista abierta.
+VISTAS = ["📊 Resultados", "🗺️ Mapa", "📍 Sección", "👥 Perfiles", "🤖 Agente de intervención", "⚙️ Modelo"]
+pantalla = st.radio("Vista", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
 
-with tab_res:
+if pantalla == VISTAS[0]:
     pantalla_resultados(vista, datos, anio, zona, edo_sel, mpio_sel)
 
 # --------------------------------------------------------------------------
 # Mapa
 # --------------------------------------------------------------------------
-with tab_mapa:
+if pantalla == VISTAS[1]:
     capa = st.radio("Colorear por", ["Riesgo", "Causa principal", "Perfil"], horizontal=True)
     if edo_sel == 0:
-        geo = cargar_geo("entidades.geojson")
+        geo, centro, zoom = geo_pais()
         agg = (datos.assign(_w=datos["riesgo"] * datos["LN_prev"])
                .groupby(["EDOCVE", "EDONOM"], as_index=False)
                .agg(_w=("_w", "sum"), LN=("LN_prev", "sum"), secciones=("SECCION", "size")))
@@ -578,11 +638,11 @@ with tab_mapa:
             st.warning("Falta la cartografía (data/processed/geo). Genérala con `python -m src.geo`.")
             st.bar_chart(agg.set_index("EDONOM")["riesgo"].sort_values())
         else:
-            st.plotly_chart(mapa(agg, geo, "EDOCVE", "riesgo", ["EDONOM", "secciones", "LN"],
+            st.plotly_chart(mapa(agg, geo, centro, zoom, "EDOCVE", "riesgo", ["EDONOM", "secciones", "LN"],
                                  "Riesgo medio por entidad (ponderado por lista nominal)"),
                             width="stretch")
     else:
-        geo = cargar_geo(f"secciones_{edo_sel:02d}.geojson")
+        geo, centro, zoom = geo_zona(anio, edo_sel, mpio_sel)
         df = vista.copy()
         df["factor"] = df["causa_principal"].map(NOMBRE_FACTOR)
         color = {"Riesgo": "riesgo", "Causa principal": "factor", "Perfil": "perfil_nombre"}[capa]
@@ -591,11 +651,8 @@ with tab_mapa:
         elif geo is None:
             st.warning("Falta la cartografía de secciones. Genérala con `python -m src.geo`.")
         else:
-            claves = set(df["clave"])
-            geo = {"type": "FeatureCollection",
-                   "features": [f for f in geo["features"] if f["properties"]["clave"] in claves]}
             hover = ["SECCION", "MPIONOM", "riesgo", "factor"] if "MPIONOM" in df else ["SECCION", "riesgo", "factor"]
-            st.plotly_chart(mapa(df, geo, "clave", color, hover,
+            st.plotly_chart(mapa(df, geo, centro, zoom, "clave", color, hover,
                                  f"{capa} por sección · {ENTIDADES[edo_sel]}", continuo=color == "riesgo"),
                             width="stretch")
 
@@ -613,13 +670,13 @@ with tab_mapa:
 # --------------------------------------------------------------------------
 # Sección
 # --------------------------------------------------------------------------
-with tab_sec:
+if pantalla == VISTAS[2]:
     opciones = vista.sort_values("riesgo", ascending=False)
     if opciones.empty:
         st.info("No hay secciones con los filtros elegidos.")
     else:
         idx = st.selectbox(
-            "Sección (ordenadas por riesgo)", opciones.index[:5000],
+            "Sección (las 1,000 de mayor riesgo)", opciones.index[:1000],
             format_func=lambda i: f"{ENTIDADES[opciones.at[i, 'EDOCVE']]} · sección "
                                   f"{opciones.at[i, 'SECCION']} · riesgo {opciones.at[i, 'riesgo']:.1%}")
         fila = opciones.loc[idx]
@@ -661,7 +718,7 @@ with tab_sec:
 # --------------------------------------------------------------------------
 # Perfiles
 # --------------------------------------------------------------------------
-with tab_perf:
+if pantalla == VISTAS[3]:
     desc = cargar_json("perfiles_descripcion_2024.json")
     if desc is None or "perfil_nombre" not in datos:
         st.info("No hay perfiles disponibles.")
@@ -671,8 +728,13 @@ with tab_perf:
         for p in desc["perfiles"]:
             with st.expander(f"**{p['nombre']}** · {p['n_secciones']:,} secciones"):
                 st.write(p["narrativa"])
-        fig = px.box(vista[vista["perfil_nombre"] != "Sin dato"], x="riesgo", y="perfil_nombre",
-                     points=False, title=f"Riesgo {anio} por perfil")
+        q = (vista[vista["perfil_nombre"] != "Sin dato"].groupby("perfil_nombre")["riesgo"]
+             .quantile([0.05, 0.25, 0.5, 0.75, 0.95]).unstack())
+        fig = go.Figure(go.Box(y=q.index, q1=q[0.25], median=q[0.5], q3=q[0.75], lowerfence=q[0.05],
+                               upperfence=q[0.95], orientation="h", marker_color=PALETA["secundario"],
+                               fillcolor=PALETA["lavanda_media"], name="riesgo"))
+        fig.update_layout(title=f"Riesgo {anio} por perfil (percentiles 5–95)", showlegend=False)
+        fig.update_xaxes(tickformat=".0%")
         fig.update_layout(yaxis_title=None, height=380)
         st.plotly_chart(fig, width="stretch")
         mezcla = (vista[vista["perfil_nombre"] != "Sin dato"]
@@ -686,7 +748,7 @@ with tab_perf:
 # --------------------------------------------------------------------------
 # Agente
 # --------------------------------------------------------------------------
-with tab_agente:
+if pantalla == VISTAS[4]:
     st.markdown(
         "Agente **basado en utilidad**: para cada sección propone medidas que atienden sus "
         "factores de riesgo principales, estima votantes adicionales por unidad de costo y "
@@ -744,7 +806,7 @@ with tab_agente:
 # --------------------------------------------------------------------------
 # Modelo
 # --------------------------------------------------------------------------
-with tab_modelo:
+if pantalla == VISTAS[5]:
     met = cargar_json("riesgo_metricas.json")
     if met is None:
         st.info("No hay métricas (riesgo_metricas.json).")
