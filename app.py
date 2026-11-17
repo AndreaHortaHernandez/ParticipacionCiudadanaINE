@@ -36,7 +36,7 @@ NOMBRE_FACTOR = {
     "historial_bajo": "Historial de la sección", "desmovilizacion_intermedias": "Desmovilización en intermedias",
     "caida_reciente": "Caída reciente", "volatilidad": "Volatilidad", "jovenes": "Jóvenes",
     "envejecimiento": "Estructura de edad", "genero": "Brecha de género",
-    "territorio_acceso": "Tipo de sección y crecimiento del padrón", "contexto_municipal": "Contexto municipal",
+    "territorio_acceso": "Tipo de sección y crecimiento del padrón", "contexto_municipal": "Contexto municipal", "contexto_vecinal": "Contexto vecinal",
     "contexto_estatal": "Contexto estatal", "concurrencia_local": "Menos elecciones locales concurrentes",
     "calidad_dato": "Calidad del dato", "ninguno": "Ninguno", "ninguna": "Ninguna",
     INERCIA: "Baja participación crónica (causa por identificar)",
@@ -145,7 +145,8 @@ def cargar_riesgo(anio: int) -> pd.DataFrame:
     r = pd.read_parquet(_ruta(f"riesgo_{anio}.parquet"))
     shap_cols = [c for c in r.columns if c.startswith("shap_")]
     cols = CLAVE + ["MPIOCVE", "LN_prev", "rural", "mixta", "nacional_supuesto", "pred_rel",
-                    "participacion_pred", "riesgo", "factor_1", "factor_1_pp", "factor_2",
+                    "participacion_pred", "riesgo", "riesgo_min", "riesgo_max", "prob_riesgo_alto",
+                    "factor_1", "factor_1_pp", "factor_2",
                     "factor_2_pp", "factor_3", "factor_3_pp", "factor_dominante"] + shap_cols
     r = r[[c for c in cols if c in r.columns]].copy()
     # Las claves vienen como enteros pequeños (int16): se pasan a int64 para poder combinarlas
@@ -830,12 +831,16 @@ if pantalla == VISTAS[2]:
                                   f"{opciones.at[i, 'SECCION']} · riesgo {opciones.at[i, 'riesgo']:.1%}")
         fila = opciones.loc[idx]
         a, b, c = st.columns(3)
-        a.metric("Riesgo de abstención", f"{fila['riesgo']:.1%}")
+        a.metric("Riesgo de abstención", f"{fila['riesgo']:.1%}",
+                 (f"rango 80%: {fila['riesgo_min']:.0%}–{fila['riesgo_max']:.0%}"
+                  if pd.notna(fila.get("riesgo_min", np.nan)) else None), delta_color="off")
         a.metric("Participación predicha", f"{fila['participacion_pred']:.1%}")
         if pd.notna(fila.get("participacion_real", np.nan)):
             b.metric("Participación real", f"{fila['participacion_real']:.1%}",
                      f"{(fila['participacion_real'] - fila['participacion_pred']) * 100:+.1f} pp vs predicción")
         b.metric("Lista nominal (elección previa)", f"{fila['LN_prev']:,.0f}")
+        if pd.notna(fila.get("prob_riesgo_alto", np.nan)):
+            c.metric("Prob. de estar en el 10% de mayor riesgo", f"{fila['prob_riesgo_alto']:.0%}")
         c.metric("Tipo de sección", fila["tipo"])
         if pd.notna(fila.get("perfil_nombre")):
             c.markdown(f"**Perfil:** {fila['perfil_nombre']}")
@@ -1010,25 +1015,73 @@ if pantalla == VISTAS[5]:
     if met is None:
         st.info("No hay métricas (riesgo_metricas.json).")
     else:
-        criterio = met.get("criterio") or (f"menor {met['metrica_seleccion']} en la validación de 2021"
-                                           if met.get("metrica_seleccion") else "")
-        st.markdown(f"**Modelo elegido:** `{met.get('modelo_elegido')}` — {criterio}")
-        cols = ["MAE_pp", "MAE_rel_pp", "MAE_dentro_estado_pp", "RMSE_pp", "sesgo_pp",
-                "spearman", "precision_top10"]
-        # Compatible con ambos formatos de salida de src.risk_model
+        NOMBRE_MODELO = {"baseline_comparable": "Baseline: repetir la elección comparable",
+                         "baseline_anterior": "Baseline: repetir la elección anterior",
+                         "ridge": "Ridge", "lasso": "Lasso", "lineal": "Lineal (Ridge)",
+                         "gradient_boosting": "Gradient Boosting", "random_forest": "Random Forest",
+                         "ensamble": "Ensamble", "ens_lineal_gb": "Ensamble lineal + GB"}
+        COLS = {"MAE_rel_pp": "Error del dónde (pp)", "MAE_dentro_estado_pp": "Error dentro del estado (pp)",
+                "spearman": "Corr. de rangos", "precision_top10": "Top 10%", "AUC_top10": "AUC top 10%",
+                "MAE_pp": "Error total (pp)", "sesgo_pp": "Sesgo (pp)", "error_nacional_pp": "Error del nivel nacional (pp)"}
+        elegido = met.get("modelo_elegido")
+        ens = met.get("ensamble") or {}
+        detalle = (f" ({NOMBRE_MODELO.get(ens.get('lineal'), ens.get('lineal'))} "
+                   f"{ens.get('peso_lineal', 0):.0%} + Gradient Boosting {1 - ens.get('peso_lineal', 0):.0%})"
+                   if elegido == "ensamble" and ens else "")
+        criterio = met.get("criterio") or (
+            f"menor {COLS.get(met['metrica_seleccion'], met['metrica_seleccion']).lower()} en validación "
+            + " y ".join(str(v) for v in met.get("pliegues_seleccion", [2021]))
+            if met.get("metrica_seleccion") else "")
+        st.markdown(f"**Modelo elegido:** {NOMBRE_MODELO.get(elegido, elegido)}{detalle} — {criterio}.")
+        st.caption("El **error del dónde** mide qué tan bien se predice la participación de cada sección "
+                   "respecto al promedio del país: es lo que aprende el modelo. El **error total** suma además el "
+                   "error del supuesto del nivel nacional, que es igual para todas las secciones y no depende del "
+                   "modelo. Todo se elige con los años de validación; 2024 es una prueba que no se usó para elegir.")
+
+        def tabla(bloque: dict) -> pd.DataFrame:
+            t = pd.DataFrame({NOMBRE_MODELO.get(m, m): {COLS[c]: v.get(c) for c in COLS if c in v}
+                              for m, v in bloque.items() if isinstance(v, dict)}).T
+            return t.dropna(axis=1, how="all")
+
         bloques = [(k, v) for k, v in met.items()
                    if k.startswith(("validacion", "referencia", "prueba")) and isinstance(v, dict)]
-        for nombre, bloque in bloques:
-            t = pd.DataFrame({m: {c: v.get(c) for c in cols} for m, v in bloque.items()
-                              if isinstance(v, dict)}).T
-            st.markdown(f"**{nombre.replace('_', ' ').capitalize()}**")
+        orden = {"prueba_2024": 0, "validacion_promedio": 1}
+        for nombre, bloque in sorted(bloques, key=lambda kv: orden.get(kv[0], 2)):
+            titulo = {"prueba_2024": "Prueba 2024 (no vista)",
+                      "validacion_promedio": "Validación (promedio de los pliegues)"}.get(
+                nombre, nombre.replace("validacion_", "Validación ").replace("referencia_", "Referencia "))
+            st.markdown(f"**{titulo}**")
+            st.dataframe(tabla(bloque), width="stretch")
+
+        nac = met.get("supuesto_nacional")
+        if nac:
+            st.markdown("**Supuesto del nivel nacional** (error en pp de cada regla; se elige con "
+                        f"{', '.join(map(str, nac['anios_para_elegir']))}): regla elegida "
+                        f"`{nac['regla_elegida']}`")
+            st.dataframe(pd.DataFrame(nac["error_pp_por_eleccion"]).T, width="stretch")
+
+        top = met.get("top10")
+        if top:
+            st.markdown("**Detectar el 10% de mayor riesgo:** clasificador específico vs. ranking de la regresión")
+            filas = {(b, m): v for b, d in top.items() for m, v in d.items()}
+            st.dataframe(pd.DataFrame(filas).T.rename(columns=COLS), width="stretch")
+
+        inter = met.get("intervalos")
+        if inter:
+            st.markdown(f"**Intervalos de predicción** (objetivo: {inter['cobertura_objetivo']:.0%} de las "
+                        "secciones dentro de su rango)")
+            t = pd.DataFrame({k: v for k, v in inter.items() if isinstance(v, dict)}).T.rename(columns={
+                "cobertura_rel": "Cobertura (dónde)", "cobertura_abs": "Cobertura (total)",
+                "ancho_medio_pp": "Ancho medio (pp)", "ajuste_conformal_pp": "Ajuste conformal (pp)",
+                "calibrado_con": "Calibrado con"})
             st.dataframe(t, width="stretch")
+
         imp = met.get("importancia_factores_2024")
         if imp:
-            s = pd.Series(imp).rename(index=NOMBRE_FACTOR).sort_values()
-            fig = px.bar(s, orientation="h", title="Importancia por factor (pp medio de |SHAP|, 2024)")
-            fig.update_layout(showlegend=False, yaxis_title=None, xaxis_title="pp", height=420)
+            s_ = pd.Series(imp).rename(index=NOMBRE_FACTOR).sort_values()
+            fig = px.bar(s_, orientation="h", title="Importancia por factor (pp medio de |SHAP|, 2024)",
+                         color_discrete_sequence=[PALETA["primario"]])
+            fig.update_layout(showlegend=False, yaxis_title=None, xaxis_title="pp", height=440)
             st.plotly_chart(fig, width="stretch")
-        st.caption("MAE en puntos porcentuales; spearman = correlación de rangos entre riesgo "
-                   "predicho y real; precision_top10 = fracción del 10% de secciones con mayor riesgo real "
-                   "que captura el 10% de mayor riesgo predicho.")
+        st.caption("Top 10% = fracción del 10% de secciones con mayor abstención real que el modelo pone en su 10% "
+                   "de mayor riesgo. AUC top 10% = qué tan bien separa ese grupo del resto (0.5 = azar, 1 = perfecto).")

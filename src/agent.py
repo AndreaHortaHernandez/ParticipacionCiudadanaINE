@@ -50,7 +50,7 @@ ESCALA_PP = 4.0          # aporte (pp) a partir del cual la medida rinde su efec
 RENDIMIENTO_SEGUNDA = 0.5
 N_CAUSAS = 2
 
-FACTORES_BASE = ["historial_bajo", "contexto_municipal", "contexto_estatal", "calidad_dato"]
+FACTORES_BASE = ["historial_bajo", "contexto_municipal", "contexto_vecinal", "contexto_estatal", "calidad_dato"]
 # La concurrencia es igual para todas las secciones de una entidad: se atiende con
 # UNA recomendación estatal (ver `recomendacion_estatal`), no sección por sección.
 FACTOR_ESTATAL = "concurrencia_local"

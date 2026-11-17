@@ -47,13 +47,16 @@ K-Means (k = 5) sobre indicadores históricos: nivel de participación relativo 
 | Repunte reciente con alta volatilidad | 14% | 57.6% |
 
 ### 3. Modelo de riesgo (`src/risk_model.py`)
-- Predice la participación de cada sección **relativa al nivel nacional**. El riesgo es 1 − participación predicha.
-- Solo usa información anterior a la elección objetivo, más el calendario de elecciones locales concurrentes, que se conoce de antemano.
-- **Validación temporal estricta** (sin mezclar años): selecciona el modelo con 2021, lo prueba con 2024 sin haberlo visto y pronostica 2027.
-- Compara una regresión lineal regularizada, Gradient Boosting y un ensamble, contra baselines simples.
+- Predice la participación de cada sección **relativa al nivel nacional** (el "dónde"). El riesgo es 1 − (participación relativa predicha + supuesto del nivel nacional).
+- Solo usa información anterior a la elección objetivo, más el calendario de elecciones locales concurrentes, que se conoce de antemano. Incluye el **contexto vecinal**: la participación pasada de las 8 secciones más cercanas.
+- **Validación temporal estricta** (sin mezclar años): todo se elige con dos pliegues de origen móvil (2015 → 2018 y 2015 + 2018 → 2021, promediados), se prueba una sola vez con 2024 y se pronostica 2027.
+- Compara **Ridge**, **Lasso**, **Gradient Boosting** y un **ensamble** del mejor lineal con Gradient Boosting, con el peso elegido en validación, contra baselines simples. Se elige por el error del "dónde", que no depende del supuesto nacional.
+- **Nivel nacional:** se comparan reglas simples (repetir la comparable, promedio de comparables, tendencia, tendencia amortiguada) y se elige con los años de validación.
+- **Riesgo alto:** un clasificador estima la probabilidad de que cada sección quede en el 10% de mayor abstención, y se compara con el ranking de la regresión.
+- **Intervalos de 80%:** Gradient Boosting por cuantiles con calibración conformal, usando un año no visto del mismo tipo de elección.
 - **SHAP** descompone el riesgo de cada sección en factores interpretables.
 
-**Métricas** (completas en [`data/processed/riesgo_metricas.json`](data/processed/riesgo_metricas.json) y en la vista ⚙️ Modelo de la app). Error medio = MAE de la participación en puntos porcentuales; correlación de rangos = Spearman entre riesgo predicho y real; top 10% = fracción del 10% de secciones con más abstención real que el modelo pone en su 10% de mayor riesgo.
+**Métricas de la corrida anterior** (se actualizan al correr `colab_reentrenar_modelo.ipynb`; completas en [`data/processed/riesgo_metricas.json`](data/processed/riesgo_metricas.json) y en la vista ⚙️ Modelo de la app). Error medio = MAE de la participación en puntos porcentuales; correlación de rangos = Spearman entre riesgo predicho y real; top 10% = fracción del 10% de secciones con más abstención real que el modelo pone en su 10% de mayor riesgo.
 
 | Modelo | Validación 2021: error (pp) | Prueba 2024: error (pp) | Prueba 2024: corr. de rangos | Prueba 2024: top 10% |
 |---|---|---|---|---|
@@ -91,6 +94,9 @@ Con un presupuesto del 10% del costo de todas las acciones posibles, para 2027 e
 1. Abre el notebook en Colab: <https://colab.research.google.com/github/AndreaHortaHernandez/ParticipacionCiudadanaINE/blob/main/notebooks/colab_app_rapida.ipynb>
 2. *Entorno de ejecución → Ejecutar todas*. Descarga solo los resultados y la cartografía del [Release](https://github.com/AndreaHortaHernandez/ParticipacionCiudadanaINE/releases) (~3 min si el Release trae `geo.zip`; ~10 min si tiene que procesar los mapas).
 3. Abre la liga `https://….trycloudflare.com` que se imprime al final. Funciona mientras la sesión de Colab siga abierta. Si el navegador dice que la página no existe, espera un minuto: el DNS tarda en conocer la liga nueva.
+
+### Reentrenar solo el modelo en Colab (~1 h, sin bajar los datos del INE)
+[`notebooks/colab_reentrenar_modelo.ipynb`](notebooks/colab_reentrenar_modelo.ipynb): toma el panel procesado y los shapefiles del Release, reentrena el modelo, regenera mapas y agente, muestra las métricas y descarga un `resultados_para_colab.zip` nuevo para subirlo al Release.
 
 ### Opción B · Pipeline completo en Colab (~1 h)
 [`notebooks/colab_pipeline.ipynb`](notebooks/colab_pipeline.ipynb): descarga los datos del INE (~3.5 GB) y la cartografía, y corre todo desde cero: ingesta → perfiles → modelo → cartografía → agente → app.
