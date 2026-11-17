@@ -1045,7 +1045,7 @@ if pantalla == VISTAS[5]:
 
         bloques = [(k, v) for k, v in met.items()
                    if k.startswith(("validacion", "referencia", "prueba")) and isinstance(v, dict)]
-        orden = {"prueba_2024": 0, "validacion_promedio": 1}
+        orden = {"prueba_2024": 0, "validacion_2021": 1, "validacion_promedio": 1}
         for nombre, bloque in sorted(bloques, key=lambda kv: orden.get(kv[0], 2)):
             titulo = {"prueba_2024": "Prueba 2024 (no vista)",
                       "validacion_promedio": "Validación (promedio de los pliegues)"}.get(
@@ -1055,9 +1055,9 @@ if pantalla == VISTAS[5]:
 
         nac = met.get("supuesto_nacional")
         if nac:
-            st.markdown("**Supuesto del nivel nacional** (error en pp de cada regla; se elige con "
-                        f"{', '.join(map(str, nac['anios_para_elegir']))}): regla elegida "
-                        f"`{nac['regla_elegida']}`")
+            st.markdown(f"**Supuesto del nivel nacional:** regla `{nac['regla_elegida']}` — "
+                        + (nac.get("criterio") or "elegida con " + ", ".join(map(str, nac.get("anios_para_elegir", []))))
+                        + ". Error en pp de cada regla en cada elección:")
             st.dataframe(pd.DataFrame(nac["error_pp_por_eleccion"]).T, width="stretch")
 
         top = met.get("top10")

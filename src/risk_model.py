@@ -14,8 +14,9 @@ participación_t(s) = nacional_t + rel_t(s)
 
 Validación temporal estricta (sin split aleatorio). Todas las variables de una
 fila objetivo t se calculan con elecciones < t:
-- selección (hiperparámetros, pesos del ensamble, modelo y supuesto nacional): origen
-  móvil con dos pliegues, 2015 → 2018 y 2015+2018 → 2021, promediados
+- selección (hiperparámetros, pesos del ensamble y modelo): entrenar con 2015+2018 →
+  validar en 2021 (intermedia, como 2027). 2015 → 2018 se reporta solo como referencia
+  (sin presidenciales en el entrenamiento)
 - prueba: entrenar con 2015, 2018 y 2021 → probar en 2024 (solo se reporta)
 - variables: elecciones < t + calendario de elecciones locales concurrentes en t (conocido ex-ante)
 - pronóstico: entrenar con 2015-2024 → predecir 2027 (sin dato real)
@@ -423,14 +424,20 @@ def nivel_nacional(nac: pd.Series, t: int, regla: str) -> float:
 REGLAS_NACIONAL = ["comparable", "promedio_comparables", "tendencia", "tendencia_amortiguada"]
 
 
-def elegir_regla_nacional(nac: pd.Series, anios_validacion: list[int]) -> tuple[str, dict]:
-    """Error (pp) de cada regla en las elecciones de validación donde se puede calcular.
-    Se elige la de menor error medio en los años donde TODAS las reglas existen."""
+REGLA_NACIONAL = "comparable"
+
+
+def evaluar_reglas_nacional(nac: pd.Series, anios_validacion: list[int]) -> tuple[str, dict]:
+    """Error (pp) de cada regla en cada elección donde se puede calcular. La regla que se
+    USA es fija (`REGLA_NACIONAL`): las alternativas solo existen desde 2021, así que habría
+    un único año para elegir, y en 2024 ninguna mejora claramente a la comparable."""
     err = {r: {int(t): round(100 * abs(nivel_nacional(nac, t, r) - nac[t]), 2)
                for t in nac.index if not np.isnan(nivel_nacional(nac, t, r))} for r in REGLAS_NACIONAL}
     comunes = [t for t in anios_validacion if all(t in e for e in err.values())]
-    regla = min(REGLAS_NACIONAL, key=lambda r: (np.mean([err[r][t] for t in comunes]), r != "comparable"))
-    return regla, {"error_pp_por_eleccion": err, "anios_para_elegir": comunes, "regla_elegida": regla}
+    mejor_val = min(REGLAS_NACIONAL, key=lambda r: np.mean([err[r][t] for t in comunes]))
+    return REGLA_NACIONAL, {"error_pp_por_eleccion": err, "regla_elegida": REGLA_NACIONAL,
+                            "criterio": "fija a priori (un solo año para comparar reglas)",
+                            "mejor_en_validacion": {"regla": mejor_val, "anios": comunes}}
 
 
 def fijar_supuesto(d: pd.DataFrame, nac: pd.Series, regla: str) -> pd.DataFrame:
@@ -543,9 +550,12 @@ def explicar(obj: dict, X: pd.DataFrame, top: int = 3) -> tuple[pd.DataFrame, pd
 # --------------------------------------------------------------------------
 # Pipeline
 # --------------------------------------------------------------------------
-# Selección con validación de origen móvil: pliegue 2018 (train 2015) y pliegue 2021
-# (train 2015+2018), promediados. 2024 es la prueba: no se usa para elegir nada.
-PLIEGUES = {2018: [2015], 2021: [2015, 2018]}
+# Selección SOLO con el pliegue 2021 (train 2015+2018): es el único cuyo entrenamiento
+# incluye una presidencial, y es intermedia como 2027. El pliegue 2018 (train solo 2015,
+# sin presidenciales) castiga a los modelos no lineales: se reporta como referencia.
+# 2024 es la prueba: no se usa para elegir nada.
+PLIEGUES = {2018: [2015], 2021: [2015, 2018]}   # se calculan y reportan ambos
+SELECCION = [2021]                              # con este se elige
 METRICA_SELECCION = "MAE_rel_pp"   # error del "dónde": no depende del supuesto nacional
 
 
@@ -565,7 +575,7 @@ def main() -> None:
     if a.rapido:
         panel = panel[panel["EDOCVE"].isin([1, 3, 6])]
     nac = participacion_nacional(cargar_panel() if a.rapido else panel)
-    regla, info_nac = elegir_regla_nacional(nac, list(PLIEGUES))
+    regla, info_nac = evaluar_reglas_nacional(nac, list(PLIEGUES))
     log(f"Supuesto nacional: '{regla}' (error por regla: {info_nac['error_pp_por_eleccion']})")
     datos = {t: fijar_supuesto(construir_features(panel, t, nac), nac, regla)
              for t in OBJETIVOS_ENTRENAMIENTO + [ANIO_PRONOSTICO]}
@@ -577,17 +587,17 @@ def main() -> None:
     def promedio(mets: list[dict]) -> dict:
         return {k: round(float(np.mean([m[k] for m in mets])), 4) for k in mets[0]}
 
-    res = {"metrica_seleccion": METRICA_SELECCION, "pliegues_seleccion": list(PLIEGUES),
+    res = {"metrica_seleccion": METRICA_SELECCION, "pliegues_seleccion": SELECCION,
            "supuesto_nacional": info_nac, "variables_espaciales": ESPACIAL}
 
-    # 1) Hiperparámetros de cada modelo base: promedio de los dos pliegues
+    # 1) Hiperparámetros de cada modelo base (se elige con SELECCION; se reportan ambos pliegues)
     mejores, preds_val = {}, {}
     for nombre, opciones in grid.items():
         best = None
         for params in opciones:
             ps = {v: predecir_rel(nombre, _ajustar(nombre, params, entrenar(trs)), datos[v])
                   for v, trs in PLIEGUES.items()}
-            met = promedio([metricas(datos[v], ps[v]) for v in PLIEGUES])
+            met = promedio([metricas(datos[v], ps[v]) for v in SELECCION])
             log(f"  [valid] {nombre} {params} -> MAE_rel {met['MAE_rel_pp']} top10 {met['precision_top10']}")
             if best is None or met[METRICA_SELECCION] < best[1][METRICA_SELECCION]:
                 best = (params, met, ps)
@@ -595,12 +605,12 @@ def main() -> None:
 
     # 2) Ensamble: mejor lineal + Gradient Boosting, peso elegido en validación
     lin = min(LINEALES, key=lambda b: promedio([metricas(datos[v], preds_val[b][v])
-                                                 for v in PLIEGUES])[METRICA_SELECCION])
+                                                 for v in SELECCION])[METRICA_SELECCION])
     curva = {}
     for w in PESOS_ENSAMBLE:
         curva[float(w)] = promedio([metricas(datos[v], w * preds_val[lin][v]
                                              + (1 - w) * preds_val["gradient_boosting"][v])
-                                    for v in PLIEGUES])[METRICA_SELECCION]
+                                    for v in SELECCION])[METRICA_SELECCION]
     w_lin = min(curva, key=curva.get)
     log(f"  [valid] ensamble {lin}+GB: peso {lin} = {w_lin} (curva MAE_rel {curva})")
     candidatos = {b: {b: 1.0} for b in grid}
@@ -610,15 +620,14 @@ def main() -> None:
 
     # 3) Validación por pliegue y promedio; baselines
     for v, trs in PLIEGUES.items():
-        bloque = res.setdefault(f"validacion_{v}", {})
+        bloque = res.setdefault(f"{'validacion' if v in SELECCION else 'referencia'}_{v}", {})
         for b in ("comparable", "anterior"):
             bloque[f"baseline_{b}"] = metricas(datos[v], baseline_rel(datos[v], b))
         for c, pesos in candidatos.items():
             pr = sum(w * preds_val[b][v] for b, w in pesos.items() if w > 0)
             bloque[c] = metricas(datos[v], pr)
-    res["validacion_promedio"] = {c: promedio([res[f"validacion_{v}"][c] for v in PLIEGUES])
-                                  for c in res[f"validacion_{min(PLIEGUES)}"]}
-    elegido = min(candidatos, key=lambda c: res["validacion_promedio"][c][METRICA_SELECCION])
+    elegido = min(candidatos, key=lambda c: promedio([res[f"validacion_{v}"][c]
+                                                     for v in SELECCION])[METRICA_SELECCION])
     res["modelo_elegido"] = elegido
     log(f"Modelo elegido: {elegido} {candidatos[elegido]}")
 
@@ -633,7 +642,7 @@ def main() -> None:
         else:
             objs[c] = ajustar_candidato(pesos, mejores, tr)
         res["prueba_2024"][c] = metricas(te, predecir_candidato(objs[c], te))
-    for clave in [k for k in res if k.startswith(("validacion_", "prueba_"))]:
+    for clave in [k for k in res if k.startswith(("validacion_", "referencia_", "prueba_"))]:
         print(f"\n[{clave}]\n", pd.DataFrame(res[clave]).T.drop(columns="n", errors="ignore").to_string())
 
     # 5) Clasificador de riesgo alto (10%) frente al ranking de la regresión
@@ -642,7 +651,7 @@ def main() -> None:
     for v, trs in PLIEGUES.items():
         clf = ajustar_clasificador(entrenar(trs), gb)
         pr = sum(w * preds_val[b][v] for b, w in candidatos[elegido].items() if w > 0)
-        res["top10"][f"validacion_{v}"] = {
+        res["top10"][f"{'validacion' if v in SELECCION else 'referencia'}_{v}"] = {
             "clasificador": metricas_top(datos[v], clf.predict_proba(datos[v][FEATURES])[:, 1]),
             "regresion_elegida": metricas_top(datos[v], -pr),
             "baseline_comparable": metricas_top(datos[v], -baseline_rel(datos[v]))}
