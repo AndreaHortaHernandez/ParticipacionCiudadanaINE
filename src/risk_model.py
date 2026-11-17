@@ -27,6 +27,7 @@ Uso:  python -m src.risk_model            (pesado: correr en Colab)
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import time
@@ -308,6 +309,10 @@ GRID = {
     "gradient_boosting": [{"learning_rate": lr, "max_leaf_nodes": l, "min_samples_leaf": m}
                           for lr in (0.05, 0.1) for l in (31, 63) for m in (50, 200)],
 }
+# Mejores hiperparámetros de la búsqueda completa (validación 2021, corrida del 2026-11-17).
+# `--fijo` los usa directamente para no repetir la búsqueda (~10 min menos en Colab).
+GRID_FIJO = {"ridge": [{"alpha": 0.1}], "lasso": [{"alpha": 1e-5}],
+             "gradient_boosting": [{"learning_rate": 0.05, "max_leaf_nodes": 31, "min_samples_leaf": 200}]}
 GRID_RAPIDO = {"ridge": [{"alpha": 10.0}], "lasso": [{"alpha": 1e-4}],
                "gradient_boosting": [{"learning_rate": 0.1, "max_leaf_nodes": 31, "min_samples_leaf": 50}]}
 FABRICA = {"ridge": modelo_ridge, "lasso": modelo_lasso, "random_forest": modelo_rf,
@@ -564,8 +569,10 @@ def main() -> None:
     ap.add_argument("--rapido", action="store_true",
                     help="prueba de humo: 3 entidades y una sola configuración por modelo")
     ap.add_argument("--salida", default=PROC_DIR, help="carpeta de salida")
+    ap.add_argument("--fijo", action="store_true",
+                    help="usar los hiperparámetros ya elegidos (GRID_FIJO) en vez de buscarlos")
     a = ap.parse_args()
-    grid = GRID_RAPIDO if a.rapido else GRID
+    grid = GRID_RAPIDO if a.rapido else GRID_FIJO if a.fijo else GRID
     t0 = time.time()
 
     def log(msg):
@@ -580,6 +587,8 @@ def main() -> None:
     datos = {t: fijar_supuesto(construir_features(panel, t, nac), nac, regla)
              for t in OBJETIVOS_ENTRENAMIENTO + [ANIO_PRONOSTICO]}
     log(f"Filas por objetivo: { {t: len(d) for t, d in datos.items()} } · espacial={ESPACIAL}")
+    del panel  # ya no se usa: libera RAM para SHAP
+    gc.collect()
 
     def entrenar(trs):
         return pd.concat([datos[t] for t in trs])
@@ -685,6 +694,12 @@ def main() -> None:
 
     # 7) Salidas para la app: backtest 2021, prueba 2024, pronóstico 2027
     os.makedirs(a.salida, exist_ok=True)
+
+    def guardar_metricas():
+        with open(os.path.join(a.salida, "riesgo_metricas.json"), "w", encoding="utf-8") as f:
+            json.dump(res, f, ensure_ascii=False, indent=2, default=str)
+    guardar_metricas()  # por si la sesión se corta durante SHAP
+    log("Métricas guardadas; calculando SHAP y salidas…")
     salida = {}
     exp24, sv24 = explicar(objs[elegido], te)
     res["importancia_factores_2024"] = (
@@ -715,11 +730,13 @@ def main() -> None:
         r["prob_riesgo_alto"] = clf.predict_proba(X[FEATURES])[:, 1]
         r = r.join(ex)
         r.reset_index().to_parquet(os.path.join(a.salida, f"riesgo_{t}.parquet"), index=False)
+        log(f"riesgo_{t}.parquet escrito")
+        del r
+        gc.collect()
     joblib.dump({"nombre": elegido, "pesos": candidatos[elegido], "modelo": o27, "params": mejores,
                  "supuesto_nacional": regla, "features": FEATURES, "grupos": GRUPOS},
                 os.path.join(a.salida, "modelo_riesgo.joblib"))
-    with open(os.path.join(a.salida, "riesgo_metricas.json"), "w", encoding="utf-8") as f:
-        json.dump(res, f, ensure_ascii=False, indent=2, default=str)
+    guardar_metricas()
     log(f"Importancia por factor (pp medio |SHAP|): {res['importancia_factores_2024']}")
     log("Listo")
 
