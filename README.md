@@ -53,15 +53,17 @@ K-Means (k = 5) sobre indicadores históricos: nivel de participación relativo 
 - Compara una regresión lineal regularizada, Gradient Boosting y un ensamble, contra baselines simples.
 - **SHAP** descompone el riesgo de cada sección en factores interpretables.
 
-**Desempeño en la corrida de referencia** (prueba con 2024, elección no vista):
+**Métricas** (completas en [`data/processed/riesgo_metricas.json`](data/processed/riesgo_metricas.json) y en la vista ⚙️ Modelo de la app). Error medio = MAE de la participación en puntos porcentuales; correlación de rangos = Spearman entre riesgo predicho y real; top 10% = fracción del 10% de secciones con más abstención real que el modelo pone en su 10% de mayor riesgo.
 
-| Modelo | Error medio (pp) | Correlación de rangos |
-|---|---|---|
-| Lineal (elegido en validación 2021) | 5.15 | 0.82 |
-| Gradient Boosting | 4.35 | 0.85 |
-| Baseline: repetir la elección comparable anterior | 4.95 | 0.82 |
+| Modelo | Validación 2021: error (pp) | Prueba 2024: error (pp) | Prueba 2024: corr. de rangos | Prueba 2024: top 10% |
+|---|---|---|---|---|
+| **Ensamble lineal + Gradient Boosting (elegido)** | **6.69** | **4.39** | **0.85** | **0.60** |
+| Lineal regularizado | 6.83 | 5.14 | 0.82 | 0.56 |
+| Gradient Boosting | 6.98 | 4.28 | 0.85 | 0.61 |
+| Baseline: repetir la elección comparable anterior | 9.75 | 4.95 | 0.82 | 0.62 |
+| Baseline: repetir la elección anterior | 8.13 | 7.13 | 0.73 | 0.61 |
 
-> El modelo se elige con la validación de 2021, no con la prueba. En 2024 Gradient Boosting rindió mejor: es una mejora pendiente a evaluar.
+> El modelo se elige solo con la validación de 2021 (menor error) y después se mide una única vez en 2024, que no vio. Frente al baseline más fuerte, en 2024 reduce el error (4.39 vs 4.95 pp) y ordena mejor las secciones (0.85 vs 0.82), pero no identifica mejor el 10% de mayor riesgo (0.60 vs 0.62).
 
 ### 4. Agente de intervención (`src/agent.py`)
 Agente racional **basado en utilidad**:
@@ -69,23 +71,26 @@ Agente racional **basado en utilidad**:
 2. **Acción.** Cada causa tiene una medida específica (p. ej., caída reciente → brigadas casa por casa; jóvenes → programa en escuelas y redes). Tener menos elecciones locales concurrentes es igual en toda la entidad, así que se atiende con **una recomendación estatal** al OPLE.
 3. **Prioridad.** Ordena las acciones por votantes adicionales esperados por unidad de costo y las elige hasta agotar el presupuesto.
 
+Con un presupuesto del 10% del costo de todas las acciones posibles, para 2027 el agente elige **13,751 acciones** en **13,724 secciones** (20.6 millones de electores) y espera **≈163 mil votantes adicionales**. La medida más usada es la campaña sobre elecciones intermedias.
+
 > **Supuesto importante:** los efectos y costos de las medidas son **ilustrativos** y están documentados en el código. El modelo identifica dónde y por qué hay riesgo; no estima efectos causales de las medidas.
 
 ### 5. App (`app.py`)
 - **📊 Resultados:** eliges la zona y presionas *Ver resultados*. Muestra una conclusión automática, indicadores, nivel de riesgo, causas, perfiles, la estrategia del agente, qué midió el sistema y la descarga en CSV.
-- **🗺️ Mapa:** riesgo, causa principal o perfil por sección, con zoom automático a la entidad o municipio elegido.
-- **📍 Sección:** por qué tiene riesgo una sección específica y qué recomienda el agente.
-- **👥 Perfiles**, **🤖 Agente** (presupuesto ajustable) y **⚙️ Modelo** (métricas).
+- **🗺️ Mapa:** riesgo, plan del agente, causa principal o perfil. Por entidad a nivel nacional, por municipio al elegir una entidad (rápido) y por sección al elegir un municipio o al pedir el detalle.
+- **📍 Sección:** por qué tiene riesgo una sección y el razonamiento del agente en 4 pasos: percibe, diagnostica, evalúa y decide.
+- **🤖 Agente:** el ciclo del agente con sus números, la curva de decisión por utilidad, la tabla de secciones elegidas con su causa, medida, efecto, costo y utilidad, y el razonamiento de cualquier sección.
+- **👥 Perfiles** y **⚙️ Modelo** (métricas).
+- El **presupuesto del agente** se ajusta en la barra lateral y aplica a todas las vistas.
 
 ---
 
 ## Cómo correrlo
 
-### Opción A · App rápida en Colab (~10 min, sin reentrenar)
-1. Abre [`notebooks/colab_app_rapida.ipynb`](notebooks/colab_app_rapida.ipynb) en Google Colab.
-2. *Entorno de ejecución → Ejecutar todas*.
-3. Cuando lo pida, sube `resultados_para_colab.zip` (resultados ya calculados; pídelo al equipo, no está en el repo por su tamaño).
-4. Abre la liga `https://….trycloudflare.com` que se imprime al final. Funciona mientras la sesión de Colab siga abierta.
+### Opción A · App rápida en Colab (sin reentrenar)
+1. Abre el notebook en Colab: <https://colab.research.google.com/github/AndreaHortaHernandez/ParticipacionCiudadanaINE/blob/main/notebooks/colab_app_rapida.ipynb>
+2. *Entorno de ejecución → Ejecutar todas*. Descarga solo los resultados y la cartografía del [Release](https://github.com/AndreaHortaHernandez/ParticipacionCiudadanaINE/releases) (~3 min si el Release trae `geo.zip`; ~10 min si tiene que procesar los mapas).
+3. Abre la liga `https://….trycloudflare.com` que se imprime al final. Funciona mientras la sesión de Colab siga abierta. Si el navegador dice que la página no existe, espera un minuto: el DNS tarda en conocer la liga nueva.
 
 ### Opción B · Pipeline completo en Colab (~1 h)
 [`notebooks/colab_pipeline.ipynb`](notebooks/colab_pipeline.ipynb): descarga los datos del INE (~3.5 GB) y la cartografía, y corre todo desde cero: ingesta → perfiles → modelo → cartografía → agente → app.

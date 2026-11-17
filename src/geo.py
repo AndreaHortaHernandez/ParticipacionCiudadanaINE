@@ -26,7 +26,7 @@ FUENTES = {
 }
 # Tolerancia de simplificación en metros (la cartografía viene en Lambert, metros)
 TOLERANCIA = {"ENTIDAD": 2000, "MUNICIPIO": 300, "SECCION": 40}
-DECIMALES = 5  # ~1 m en coordenadas geográficas
+DECIMALES = 4  # ~11 m: de sobra con la simplificación de 40 m y archivos ~20% más ligeros
 
 
 def _preparar(capa: str, columnas: dict[str, str]) -> gpd.GeoDataFrame:
@@ -60,12 +60,15 @@ def main() -> None:
     # Claves únicas para enlazar con los datos en el mapa
     sec["clave"] = sec["EDOCVE"] * 100000 + sec["SECCION"]
     mun["clave"] = mun["EDOCVE"] * 1000 + mun["MPIOCVE"]
+    # Solo lo que usa el mapa (clave para enlazar, municipio para filtrar): menos bytes al navegador
+    sec = sec[["clave", "MPIOCVE", "geometry"]]
+    mun = mun[["clave", "EDOCVE", "MPIOCVE", "geometry"]]
     ent["EDOCVE"] = ent["EDOCVE"].astype(int)
     _escribir(ent, "entidades.geojson")
 
     for edo in sorted(ent["EDOCVE"]):
         _escribir(mun[mun["EDOCVE"] == edo], f"municipios_{edo:02d}.geojson")
-        s = sec[sec["EDOCVE"] == edo]
+        s = sec[sec["clave"] // 100000 == edo]
         _escribir(s, f"secciones_{edo:02d}.geojson")
         print(f"entidad {edo:02d}: {len(s)} secciones")
 

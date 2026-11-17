@@ -17,7 +17,7 @@ import streamlit as st
 
 from src.agent import (CATALOGO, CAUSAS, FACTOR_ESTATAL, FACTORES_BASE, INERCIA,
                        RECOMENDACION_ESTATAL, candidatas, causas, planificar,
-                       recomendacion_estatal, recomendar_seccion, resumen)
+                       recomendacion_estatal, resumen)
 from src.ingest import CLAVE, PROC_DIR
 from src.risk_model import DESCRIPCION_FACTOR, GRUPOS
 
@@ -225,20 +225,32 @@ ALTO_MAPA = 640
 
 
 @st.cache_resource(show_spinner="Preparando el mapa…", max_entries=12)
-def geo_zona(anio: int, edo: int, mpio: int):
-    """Geometrías de las secciones de la zona + encuadre (centro, zoom). Se calcula una vez."""
+def geo_secciones(edo: int, mpio: int):
+    """Secciones de la entidad (o solo del municipio) + encuadre (centro, zoom). Se calcula una vez
+    por zona y no depende de la elección: el filtro usa el municipio que trae la cartografía."""
     geo = cargar_geo(f"secciones_{edo:02d}.geojson")
     if geo is None:
         return None, None, None
-    r = cargar_riesgo(anio)
-    m = r["EDOCVE"] == edo
     if mpio:
-        m &= r["MPIOCVE"] == mpio
-    claves = set(r.loc[m, "clave"].tolist())
-    g = {"type": "FeatureCollection",
-         "features": [f for f in geo["features"] if f["properties"]["clave"] in claves]}
-    centro, zoom = _encuadre(g, ancho_px=1100, alto_px=ALTO_MAPA - 40)
-    return g, centro, zoom
+        geo = {"type": "FeatureCollection",
+               "features": [f for f in geo["features"] if int(f["properties"].get("MPIOCVE", -1)) == mpio]}
+    centro, zoom = _encuadre(geo, ancho_px=1100, alto_px=ALTO_MAPA - 40)
+    return geo, centro, zoom
+
+
+@st.cache_resource(show_spinner="Preparando el mapa…", max_entries=12)
+def geo_municipios(edo: int):
+    """Municipios de la entidad: ~20 veces menos polígonos que las secciones, carga casi inmediata."""
+    geo = cargar_geo(f"municipios_{edo:02d}.geojson")
+    if geo is None:
+        return None, None, None
+    centro, zoom = _encuadre(geo, ancho_px=1100, alto_px=ALTO_MAPA - 40)
+    return geo, centro, zoom
+
+
+def _moda(s: pd.Series) -> str:
+    m = s.mode()
+    return str(m.iat[0]) if len(m) else "Sin dato"
 
 
 @st.cache_resource
@@ -250,36 +262,50 @@ def geo_pais():
     return geo, centro, zoom
 
 
-def mapa(df, geo, centro, zoom, clave, color, hover, titulo, continuo=True):
+SIN_ACCION = "Sin acción del agente"
+ETIQUETAS_MAPA = {"SECCION": "Sección", "MPIONOM": "Municipio", "riesgo": "Riesgo",
+                  "factor": "Causa principal", "EDONOM": "Entidad", "secciones": "Secciones",
+                  "LN": "Lista nominal", "perfil_nombre": "Perfil", "medida_agente": "Acción del agente",
+                  "votantes": "Votantes adicionales esperados", "acciones": "Acciones del agente"}
+
+
+def mapa(df, geo, centro, zoom, clave, color, hover, titulo, continuo=True, barra="Riesgo", formato=".0%"):
     """Coroplético en UNA sola capa: la geometría se envía una vez aunque el color
     sea por categorías (px crea una capa por categoría y repite toda la geometría)."""
     Traza = getattr(go, "Choroplethmap", None)
     nuevo = Traza is not None
     Traza = Traza or go.Choroplethmapbox
-    etiquetas = {"SECCION": "Sección", "MPIONOM": "Municipio", "riesgo": "Riesgo",
-                 "factor": "Causa principal", "EDONOM": "Entidad", "secciones": "Secciones",
-                 "LN": "Lista nominal", "perfil_nombre": "Perfil"}
     cd = pd.DataFrame({h: (df[h].map(lambda x: f"{x:.1%}") if h == "riesgo" else
-                           df[h].map(lambda x: f"{x:,.0f}") if h in ("LN", "secciones") else df[h].astype(str))
+                           df[h].map(lambda x: f"{x:,.0f}") if h in ("LN", "secciones", "votantes", "acciones")
+                           else df[h].astype(str))
                        for h in hover})
-    plantilla = f"<b>{etiquetas.get(hover[0], hover[0])} %{{customdata[0]}}</b><br>" + "<br>".join(
-        f"{etiquetas.get(h, h)}: %{{customdata[{i}]}}" for i, h in enumerate(hover) if i > 0) + "<extra></extra>"
+    plantilla = f"<b>{ETIQUETAS_MAPA.get(hover[0], hover[0])} %{{customdata[0]}}</b><br>" + "<br>".join(
+        f"{ETIQUETAS_MAPA.get(h, h)}: %{{customdata[{i}]}}" for i, h in enumerate(hover) if i > 0) + "<extra></extra>"
     if continuo:
         z = df[color].astype(float)
         escala = [[i / (len(ESCALA_RIESGO) - 1), c] for i, c in enumerate(ESCALA_RIESGO)]
-        extra = dict(colorbar=dict(title="Riesgo", tickformat=".0%"))
+        extra = dict(colorbar=dict(title=barra, tickformat=formato))
     else:
-        cats = sorted(df[color].astype(str).unique())
+        # "Sin acción" al final y en gris claro, para que resalte lo que sí eligió el agente
+        cats = sorted(c for c in df[color].astype(str).unique() if c != SIN_ACCION)
+        if (df[color] == SIN_ACCION).any():
+            cats.append(SIN_ACCION)
         n = max(len(cats), 1)
         z = df[color].astype(str).map({c: i for i, c in enumerate(cats)})
         escala = []
-        for i in range(n):
-            col = SECUENCIA[i % len(SECUENCIA)]
+        for i, cat in enumerate(cats):
+            col = "#E9E4EE" if cat == SIN_ACCION else SECUENCIA[i % len(SECUENCIA)]
             escala += [[i / n, col], [(i + 1) / n, col]]
         extra = dict(zmin=-0.5, zmax=n - 0.5,
                      colorbar=dict(tickvals=list(range(n)), ticktext=cats, title=None, len=0.9))
+    # Solo se envían al navegador los polígonos que tienen dato
+    ids = set(df[clave].tolist())
+    geo = {"type": "FeatureCollection",
+           "features": [f for f in geo["features"] if f["properties"].get(clave) in ids]}
+    # Con miles de polígonos el contorno blanco cuesta más que lo que aporta
+    linea = 0.4 if len(df) <= 3000 else 0
     fig = go.Figure(Traza(geojson=geo, locations=df[clave], featureidkey=f"properties.{clave}", z=z,
-                          colorscale=escala, marker_opacity=0.8, marker_line_width=0.4,
+                          colorscale=escala, marker_opacity=0.8, marker_line_width=linea,
                           marker_line_color="#FFFFFF", customdata=cd.to_numpy(),
                           hovertemplate=plantilla, **extra))
     capa = dict(style="carto-positron", center=centro, zoom=zoom)
@@ -319,7 +345,7 @@ def _encuadre(geo, ancho_px: int, alto_px: int) -> tuple[dict, float]:
 # --------------------------------------------------------------------------
 # Pantalla de resultados
 # --------------------------------------------------------------------------
-PRESUPUESTO_RESULTADOS = 10  # % del costo de todas las acciones candidatas
+PRESUPUESTO_DEFECTO = 10  # % del costo de todas las acciones candidatas (se ajusta en la barra lateral)
 
 
 def _fig(fig, alto=360):
@@ -343,7 +369,66 @@ def _plan_zona(anio: int, edo: int, mpio: int, pct: float) -> tuple[pd.DataFrame
     return plan, resumen(plan, presupuesto)
 
 
-def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
+def _acciones_por_seccion(plan: pd.DataFrame) -> pd.DataFrame:
+    """Lo que eligió el agente, una fila por sección: medida principal, acciones y votantes."""
+    if plan.empty or "seleccionada" not in plan:
+        return pd.DataFrame(columns=CLAVE + ["MPIOCVE", "medida_agente", "acciones", "votantes"])
+    s = plan[plan["seleccionada"]].sort_values("prioridad")
+    g = s.groupby(CLAVE, sort=False)
+    out = pd.DataFrame({"MPIOCVE": g["MPIOCVE"].first(), "medida_agente": g["medida"].first().map(NOMBRE_MEDIDA),
+                        "acciones": g.size(), "votantes": g["votantes"].sum()})
+    return out.reset_index()
+
+
+def traza_agente(fila: pd.Series, plan: pd.DataFrame, pct: float) -> None:
+    """El ciclo del agente para UNA sección, con sus números: percibe, diagnostica, evalúa, decide."""
+    ln = float(fila["LN_prev"]) if pd.notna(fila["LN_prev"]) else 0.0
+    st.markdown(f"<span class='paso'>1</span>**Percibe.** El modelo predice un riesgo de "
+                f"**{fila['riesgo']:.1%}** con {ln:,.0f} electores: ≈ **{fila['riesgo'] * ln:,.0f} "
+                "abstencionistas** esperados.", unsafe_allow_html=True)
+
+    base = float(fila.get("inercia_pp", 0) or 0)
+    aportes = sorted(((NOMBRE_FACTOR.get(c, c), float(fila.get(f"shap_{c}", 0) or 0) * 100) for c in CAUSAS),
+                     key=lambda x: -x[1])
+    positivas = [(n, pp) for n, pp in aportes if pp > 0]
+    diag = (", ".join(f"**{n.lower()}** (+{pp:.1f} pp)" for n, pp in positivas[:3]) if positivas else
+            "ninguna causa atendible: el agente la trata como **baja participación crónica (causa por identificar)**")
+    st.markdown(f"<span class='paso'>2</span>**Diagnostica.** Nivel base (historial y contexto) = "
+                f"{base:.1f} pp: dice *cuánto* riesgo hay, no por qué. Causas atendibles: {diag}.",
+                unsafe_allow_html=True)
+
+    acc = plan[(plan["EDOCVE"] == fila["EDOCVE"]) & (plan["SECCION"] == fila["SECCION"])] if len(plan) else plan
+    if acc.empty:
+        st.markdown("<span class='paso'>3</span>**Evalúa.** No hay acciones posibles: ningún factor eleva el "
+                    "riesgo de esta sección.", unsafe_allow_html=True)
+        st.success("Decisión: no intervenir.")
+        return
+    st.markdown("<span class='paso'>3</span>**Evalúa** las medidas que atienden sus causas:",
+                unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame({
+        "Medida": acc["medida"].map(NOMBRE_MEDIDA), "Atiende": acc["factor"].map(NOMBRE_FACTOR),
+        "Aporte (pp)": acc["contribucion_pp"].round(1), "Efecto esperado (pp)": acc["ganancia_pp"].round(2),
+        "Votantes extra": acc["votantes"].round(1), "Costo": acc["costo"].round(1),
+        "Utilidad": acc["utilidad"].round(3)}), hide_index=True, width="stretch")
+
+    sel = plan[plan["seleccionada"]]
+    corte = float(sel["utilidad"].min()) if len(sel) else float("inf")
+    lineas = []
+    for _, a in acc.iterrows():
+        nombre = NOMBRE_MEDIDA.get(a["medida"], a["medida"])
+        if a["seleccionada"]:
+            lineas.append(f"✅ **{nombre}**: entra. Utilidad {a['utilidad']:.3f} ≥ corte {corte:.3f}; "
+                          f"es la acción #{int(a['prioridad']):,} de {len(plan):,} en la zona.")
+        elif a["orden_en_seccion"] > 1 and a["utilidad"] >= corte:
+            lineas.append(f"❌ **{nombre}**: no entra porque la medida de su causa principal no entró.")
+        else:
+            lineas.append(f"❌ **{nombre}**: no entra. Utilidad {a['utilidad']:.3f} < corte {corte:.3f}: el "
+                          f"presupuesto del {pct}% se acaba antes (es la #{int(a['prioridad']):,}). "
+                          "Con más presupuesto entraría.")
+    st.markdown("<span class='paso'>4</span>**Decide.**<br>" + "<br>".join(lineas), unsafe_allow_html=True)
+
+
+def pantalla_resultados(vista, datos, anio, zona, edo, mpio, pct):
     st.markdown(
         "<div class='retos'>"
         "<div class='reto r1'><h5>1 · Perfiles ciudadanos</h5><p>Agrupa las secciones en 5 perfiles "
@@ -376,7 +461,7 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
     abst = float((v["riesgo"] * v["LN_prev"]).sum())
     riesgo_zona, riesgo_pais = pond(v, "riesgo"), pond(datos, "riesgo")
     n_alto = int((v["nivel"] == "Alto").sum())
-    plan, res = _plan_zona(anio, edo, mpio, PRESUPUESTO_RESULTADOS)
+    plan, res = _plan_zona(anio, edo, mpio, pct)
 
     # Causas atendibles: aporte positivo medio (pp, ponderado por LN). El nivel base
     # (historial y contexto) se reporta aparte: dice cuánto riesgo hay, no por qué.
@@ -406,7 +491,7 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
                   f"eleva el riesgo ≈{estados_conc['aporte_pp'].mean():.1f} pp: conviene una campaña con el OPLE.")
     if res:
         top_med = res["por_medida"][0]["nombre"] if res["por_medida"] else "—"
-        texto += (f" Con un presupuesto del {PRESUPUESTO_RESULTADOS}%, el agente propone "
+        texto += (f" Con un presupuesto del {pct}%, el agente propone "
                   f"<b>{res['acciones']:,} acciones</b> en <b>{res['secciones_intervenidas']:,} secciones</b>, "
                   f"con ≈<b>{res['votantes_adicionales_esperados']:,.0f} votantes adicionales</b>; "
                   f"la medida principal es <i>{top_med}</i>.")
@@ -513,8 +598,9 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio):
                      column_config={"riesgo": st.column_config.ProgressColumn("riesgo", format="%.2f",
                                                                               min_value=0, max_value=1),
                                     "votantes": st.column_config.NumberColumn("votantes extra", format="%.1f")})
-        st.caption(f"Presupuesto: {PRESUPUESTO_RESULTADOS}% del costo de todas las acciones posibles. "
-                   "Ajústalo en la pestaña 🤖 Agente. Efectos y costos son supuestos ilustrativos.")
+        st.caption(f"Presupuesto: {pct}% del costo de todas las acciones posibles (ajústalo en la barra "
+                   "lateral). En 🤖 Agente se ve paso a paso por qué eligió cada sección. "
+                   "Efectos y costos son supuestos ilustrativos.")
 
     # ---- Validación con dato real
     if "participacion_real" in v and v["participacion_real"].notna().any():
@@ -590,6 +676,11 @@ if edo_sel and "MPIONOM" in vista:
     if mpio_sel:
         vista = vista[vista["MPIOCVE"] == mpio_sel]
 
+pct = st.sidebar.slider(
+    "🤖 Presupuesto del agente (%)", 1, 100, PRESUPUESTO_DEFECTO,
+    help="Porcentaje del costo de aplicar todas las acciones posibles en la zona. "
+         "Lo usan Resultados, Mapa, Sección y Agente.")
+
 st.sidebar.caption(
     "Riesgo = 1 − participación predicha. La participación predicha suma el nivel "
     "relativo que aprende el modelo y un supuesto de nivel nacional (elección comparable "
@@ -618,43 +709,101 @@ VISTAS = ["📊 Resultados", "🗺️ Mapa", "📍 Sección", "👥 Perfiles", "
 pantalla = st.radio("Vista", VISTAS, horizontal=True, key="vista", label_visibility="collapsed")
 
 if pantalla == VISTAS[0]:
-    pantalla_resultados(vista, datos, anio, zona, edo_sel, mpio_sel)
+    pantalla_resultados(vista, datos, anio, zona, edo_sel, mpio_sel, pct)
 
 # --------------------------------------------------------------------------
 # Mapa
 # --------------------------------------------------------------------------
 if pantalla == VISTAS[1]:
-    capa = st.radio("Colorear por", ["Riesgo", "Causa principal", "Perfil"], horizontal=True)
+    plan_m, _ = _plan_zona(anio, edo_sel, mpio_sel, pct)
+    acc = _acciones_por_seccion(plan_m)
+    c_capa, c_nivel = st.columns([3, 2])
+    capa = c_capa.radio("Colorear por", ["Riesgo", "🤖 Plan del agente", "Causa principal", "Perfil"],
+                        horizontal=True)
+    nivel = "Secciones"
+    if edo_sel and not mpio_sel:
+        nivel = c_nivel.radio("Detalle", ["Municipios (rápido)", "Secciones"], horizontal=True,
+                              help="Por sección se dibujan miles de polígonos y tarda más. "
+                                   "Elige un municipio en la barra lateral para ver sus secciones al instante.")
+    plan_txt = (f"Plan del agente con presupuesto del {pct}%: "
+                f"{len(acc):,} secciones con acción de {len(vista):,}.")
+
     if edo_sel == 0:
         geo, centro, zoom = geo_pais()
         agg = (datos.assign(_w=datos["riesgo"] * datos["LN_prev"])
                .groupby(["EDOCVE", "EDONOM"], as_index=False)
                .agg(_w=("_w", "sum"), LN=("LN_prev", "sum"), secciones=("SECCION", "size")))
         agg["riesgo"] = agg["_w"] / agg["LN"]
-        if capa != "Riesgo":
+        a_e = acc.groupby("EDOCVE").agg(votantes=("votantes", "sum"), acciones=("acciones", "sum"))
+        agg = agg.join(a_e, on="EDOCVE").fillna({"votantes": 0, "acciones": 0})
+        if capa in ("Causa principal", "Perfil"):
             st.info("A nivel nacional el mapa muestra el riesgo por entidad. "
-                    "Elige una entidad para ver factores y perfiles por sección.")
+                    "Elige una entidad para ver causas y perfiles.")
         if geo is None:
             st.warning("Falta la cartografía (data/processed/geo). Genérala con `python -m src.geo`.")
             st.bar_chart(agg.set_index("EDONOM")["riesgo"].sort_values())
+        elif capa == "🤖 Plan del agente":
+            st.caption(plan_txt)
+            st.plotly_chart(mapa(agg, geo, centro, zoom, "EDOCVE", "votantes",
+                                 ["EDONOM", "acciones", "votantes", "riesgo"],
+                                 "Votantes adicionales que espera el agente por entidad",
+                                 barra="Votantes", formato=",.0f"), width="stretch")
         else:
             st.plotly_chart(mapa(agg, geo, centro, zoom, "EDOCVE", "riesgo", ["EDONOM", "secciones", "LN"],
                                  "Riesgo medio por entidad (ponderado por lista nominal)"),
                             width="stretch")
+    elif nivel.startswith("Municipios"):
+        geo, centro, zoom = geo_municipios(edo_sel)
+        v_ = vista[vista["MPIOCVE"] > 0].assign(
+            _w=lambda d: d["riesgo"] * d["LN_prev"], factor=lambda d: d["causa_principal"].map(NOMBRE_FACTOR))
+        g = v_.groupby("MPIOCVE")
+        mun = pd.DataFrame({"_w": g["_w"].sum(), "LN": g["LN_prev"].sum(), "secciones": g.size(),
+                            "MPIONOM": g["MPIONOM"].agg(_moda), "factor": g["factor"].agg(_moda)})
+        if "perfil_nombre" in v_:
+            mun["perfil_nombre"] = g["perfil_nombre"].agg(_moda)
+        mun["riesgo"] = mun["_w"] / mun["LN"]
+        a_m = acc[acc["EDOCVE"] == edo_sel].groupby("MPIOCVE").agg(votantes=("votantes", "sum"),
+                                                                   acciones=("acciones", "sum"))
+        mun = mun.join(a_m).fillna({"votantes": 0, "acciones": 0}).reset_index()
+        mun["clave"] = edo_sel * 1000 + mun["MPIOCVE"]
+        if geo is None:
+            st.warning("Falta la cartografía de municipios. Genérala con `python -m src.geo`.")
+        elif capa == "🤖 Plan del agente":
+            st.caption(plan_txt)
+            st.plotly_chart(mapa(mun, geo, centro, zoom, "clave", "votantes",
+                                 ["MPIONOM", "acciones", "votantes", "riesgo"],
+                                 f"Votantes adicionales que espera el agente · {ENTIDADES[edo_sel]}",
+                                 barra="Votantes", formato=",.0f"), width="stretch")
+        else:
+            color = {"Riesgo": "riesgo", "Causa principal": "factor", "Perfil": "perfil_nombre"}[capa]
+            if color not in mun:
+                st.warning("No hay perfiles cargados (perfiles_seccion_2024.parquet).")
+            else:
+                st.plotly_chart(mapa(mun, geo, centro, zoom, "clave", color,
+                                     ["MPIONOM", "riesgo", "factor", "secciones"],
+                                     f"{capa} por municipio · {ENTIDADES[edo_sel]}"
+                                     + (" (la más frecuente)" if color != "riesgo" else ""),
+                                     continuo=color == "riesgo"), width="stretch")
     else:
-        geo, centro, zoom = geo_zona(anio, edo_sel, mpio_sel)
+        geo, centro, zoom = geo_secciones(edo_sel, mpio_sel)
         df = vista.copy()
         df["factor"] = df["causa_principal"].map(NOMBRE_FACTOR)
-        color = {"Riesgo": "riesgo", "Causa principal": "factor", "Perfil": "perfil_nombre"}[capa]
+        df = df.merge(acc[CLAVE + ["medida_agente"]], on=CLAVE, how="left")
+        df["medida_agente"] = df["medida_agente"].fillna(SIN_ACCION)
+        color = {"Riesgo": "riesgo", "🤖 Plan del agente": "medida_agente", "Causa principal": "factor",
+                 "Perfil": "perfil_nombre"}[capa]
         if color not in df:
             st.warning("No hay perfiles cargados (perfiles_seccion_2024.parquet).")
         elif geo is None:
             st.warning("Falta la cartografía de secciones. Genérala con `python -m src.geo`.")
         else:
-            hover = ["SECCION", "MPIONOM", "riesgo", "factor"] if "MPIONOM" in df else ["SECCION", "riesgo", "factor"]
-            st.plotly_chart(mapa(df, geo, centro, zoom, "clave", color, hover,
-                                 f"{capa} por sección · {ENTIDADES[edo_sel]}", continuo=color == "riesgo"),
-                            width="stretch")
+            if color == "medida_agente":
+                st.caption(plan_txt + " Cada color es la medida principal que eligió; "
+                           "el detalle de por qué está en 🤖 Agente.")
+            hover = ["SECCION", "MPIONOM", "riesgo", "factor", "medida_agente"]
+            st.plotly_chart(mapa(df, geo, centro, zoom, "clave", color, [h for h in hover if h in df],
+                                 f"{capa.replace('🤖 ', '')} por sección · {zona}",
+                                 continuo=color == "riesgo"), width="stretch")
 
     st.subheader("Secciones con mayor riesgo (lista nominal ≥ 50)")
     top = vista[vista["LN_prev"] >= 50].nlargest(50, "riesgo").copy()  # sin secciones diminutas
@@ -705,15 +854,9 @@ if pantalla == VISTAS[2]:
         fig.update_layout(height=420, yaxis_title=None, xaxis_title="pp", legend_title=None)
         st.plotly_chart(fig, width="stretch")
 
-        st.subheader("Recomendación del agente")
-        rec = recomendar_seccion(fila)
-        if not rec:
-            st.success("Ningún factor eleva el riesgo de esta sección: no se recomienda intervención.")
-        for r_ in rec:
-            st.markdown(
-                f"- **{r_['nombre']}** — atiende *{NOMBRE_FACTOR.get(r_['factor'], r_['factor']).lower()}* "
-                f"(aporta {r_['contribucion_pp']:.1f} pp)"
-                + (f"; efecto supuesto ≈ +{r_['ganancia_pp']:.1f} pp" if r_.get("ganancia_pp") else ""))
+        st.subheader("🤖 Qué decide el agente en esta sección")
+        plan_s, _ = _plan_zona(anio, edo_sel, mpio_sel, pct)
+        traza_agente(fila, plan_s, pct)
 
 # --------------------------------------------------------------------------
 # Perfiles
@@ -750,37 +893,59 @@ if pantalla == VISTAS[3]:
 # --------------------------------------------------------------------------
 if pantalla == VISTAS[4]:
     st.markdown(
-        "Agente **basado en utilidad**: para cada sección propone medidas que atienden sus "
-        "factores de riesgo principales, estima votantes adicionales por unidad de costo y "
-        "elige acciones en orden de utilidad hasta agotar el presupuesto. "
-        "Efectos y costos son **supuestos ilustrativos** (ver `src/agent.py`).")
-    cand = cargar_candidatas(anio)
-    if edo_sel:
-        cand = cand[cand["EDOCVE"] == edo_sel]
-        if mpio_sel:
-            cand = cand[cand["MPIOCVE"] == mpio_sel]
-    if cand.empty:
+        "Agente racional **basado en utilidad**. En cada sección repite el mismo ciclo: **percibe** el riesgo "
+        "que predice el modelo, **diagnostica** qué lo causa, **evalúa** las medidas posibles y **decide** "
+        "cuáles aplicar con el presupuesto. Efectos y costos son **supuestos ilustrativos** (ver `src/agent.py`).")
+    plan, res = _plan_zona(anio, edo_sel, mpio_sel, pct)
+    if plan.empty:
         st.info("No hay acciones candidatas para este filtro.")
     else:
-        pct = st.slider("Presupuesto (% del costo de aplicar todas las acciones candidatas)",
-                        1, 100, 10)
-        presupuesto = cand["costo"].sum() * pct / 100
-        plan = planificar(cand, presupuesto)
-        res = resumen(plan, presupuesto)
+        sel = plan[plan["seleccionada"]]
+        corte = float(sel["utilidad"].min()) if len(sel) else float("nan")
+        n_causa = int((vista["causa_1"] != "ninguna").sum())
+        n_inercia = int((vista["causa_principal"] == INERCIA).sum())
+        n_nada = len(vista) - n_causa - n_inercia
+        n_secc_cand = plan[CLAVE].drop_duplicates().shape[0]
+        st.markdown(
+            "<div class='retos'>"
+            f"<div class='reto r1'><h5>1 · Percibe</h5><p><b>{len(vista):,}</b> secciones: riesgo predicho por "
+            "el modelo y aporte de cada factor (SHAP).</p></div>"
+            f"<div class='reto r2'><h5>2 · Diagnostica</h5><p><b>{n_causa:,}</b> con una causa atendible · "
+            f"<b>{n_inercia:,}</b> solo con baja participación crónica · <b>{n_nada:,}</b> sin nada que atender.</p></div>"
+            f"<div class='reto r2'><h5>3 · Evalúa</h5><p><b>{len(plan):,}</b> acciones posibles en "
+            f"<b>{n_secc_cand:,}</b> secciones. A cada una le calcula utilidad = votantes extra ÷ costo.</p></div>"
+            f"<div class='reto r3'><h5>4 · Decide</h5><p>Ordena por utilidad y elige hasta gastar el <b>{pct}%</b>: "
+            f"<b>{res['acciones']:,}</b> acciones en <b>{res['secciones_intervenidas']:,}</b> secciones "
+            f"(entran las de utilidad ≥ {corte:.3f}).</p></div></div>",
+            unsafe_allow_html=True)
+
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Acciones", f"{res['acciones']:,}")
         k2.metric("Secciones intervenidas", f"{res['secciones_intervenidas']:,}")
         k3.metric("Ciudadanos alcanzados", f"{res['ciudadanos_alcanzados']:,}")
         k4.metric("Votantes adicionales esperados", f"{res['votantes_adicionales_esperados']:,.0f}")
 
+        a, b = st.columns(2)
+        # Curva de decisión: acciones en orden de utilidad contra el costo acumulado
+        paso = max(1, len(plan) // 4000)
+        cur = plan.iloc[::paso].assign(estado=lambda d: np.where(d["seleccionada"], "Elegida", "No cabe"))
+        f_c = px.scatter(cur, x="costo_acum", y="utilidad", color="estado",
+                         color_discrete_map={"Elegida": PALETA["primario"], "No cabe": PALETA["lavanda_media"]},
+                         title="Cómo decide: acciones ordenadas por utilidad")
+        f_c.add_vline(x=res["presupuesto"], line_dash="dash", line_color=PALETA["secundario"],
+                      annotation_text=f"presupuesto {pct}%")
+        f_c.update_traces(marker_size=4)
+        f_c.update_xaxes(title="costo acumulado")
+        f_c.update_yaxes(title="utilidad (votantes / costo)")
+        a.plotly_chart(_fig(f_c, 400), width="stretch")
         pm = pd.DataFrame(res["por_medida"])
         if not pm.empty:
-            fig = px.bar(pm.sort_values("votantes"), x="votantes", y="nombre", orientation="h",
-                         hover_data=["acciones", "costo"], title="Votantes adicionales esperados por medida")
-            fig.update_layout(yaxis_title=None, height=380)
-            st.plotly_chart(fig, width="stretch")
+            f_m = px.bar(pm.sort_values("votantes"), x="votantes", y="nombre", orientation="h",
+                         color_discrete_sequence=[PALETA["primario"]], hover_data=["acciones", "costo"],
+                         title="Votantes adicionales esperados por medida")
+            f_m.update_layout(yaxis_title=None)
+            b.plotly_chart(_fig(f_m, 400), width="stretch")
 
-        sel = plan[plan["seleccionada"]].copy()
         if "participacion_real" in vista and len(sel):
             r_ = vista.set_index(CLAVE)
             elegidas = r_.index.isin(pd.MultiIndex.from_frame(sel[CLAVE].drop_duplicates()))
@@ -789,19 +954,53 @@ if pantalla == VISTAS[4]:
                 f"{1 - pond(r_[elegidas].reset_index(), 'participacion_real'):.1%} vs. resto "
                 f"{1 - pond(r_[~elegidas].reset_index(), 'participacion_real'):.1%}.")
 
-        sel["medida"] = sel["medida"].map(NOMBRE_MEDIDA)
-        sel["factor"] = sel["factor"].map(NOMBRE_FACTOR)
-        sel["entidad"] = sel["EDOCVE"].map(ENTIDADES)
-        cols = ["prioridad", "entidad", "SECCION", "medida", "factor", "riesgo", "LN_prev",
-                "ganancia_pp", "votantes", "costo", "utilidad"]
-        st.dataframe(sel[cols].head(1000), hide_index=True, width="stretch",
-                     column_config={"riesgo": st.column_config.NumberColumn(format="%.3f"),
-                                    "ganancia_pp": st.column_config.NumberColumn("ganancia (pp)", format="%.2f"),
-                                    "votantes": st.column_config.NumberColumn(format="%.1f"),
-                                    "costo": st.column_config.NumberColumn(format="%.1f"),
-                                    "utilidad": st.column_config.NumberColumn(format="%.3f")})
-        st.download_button("Descargar plan (CSV)", sel[cols].to_csv(index=False).encode("utf-8"),
+        # ---- Tabla explícita de lo que eligió
+        st.markdown("#### Secciones que eligió el agente y por qué")
+        ver_todas = st.toggle("Mostrar también las acciones que no cupieron en el presupuesto")
+        t = (plan if ver_todas else sel).head(2000)
+        t = t.merge(vista[CLAVE + ["MPIONOM"]] if "MPIONOM" in vista else vista[CLAVE], on=CLAVE, how="left")
+        tabla = pd.DataFrame({
+            "Prioridad": t["prioridad"],
+            "Decisión": np.where(t["seleccionada"], "✅ Elegida", "❌ No cabe"),
+            "Entidad": t["EDOCVE"].map(ENTIDADES),
+            "Municipio": t["MPIONOM"] if "MPIONOM" in t else "—",
+            "Sección": t["SECCION"],
+            "Riesgo": t["riesgo"],
+            "Causa detectada": t["factor"].map(NOMBRE_FACTOR),
+            "Aporte de la causa (pp)": t["contribucion_pp"],
+            "Medida": t["medida"].map(NOMBRE_MEDIDA),
+            "Motivo": np.where(t["factor"] == INERCIA, "Sin causa atendible → diagnóstico",
+                               np.where(t["orden_en_seccion"] == 1, "Causa principal",
+                                        "2ª causa (rinde la mitad)")),
+            "Efecto esperado (pp)": t["ganancia_pp"],
+            "Votantes extra": t["votantes"],
+            "Costo": t["costo"],
+            "Utilidad": t["utilidad"],
+        })
+        st.dataframe(tabla, hide_index=True, width="stretch",
+                     column_config={"Riesgo": st.column_config.ProgressColumn(format="%.2f", min_value=0, max_value=1),
+                                    "Aporte de la causa (pp)": st.column_config.NumberColumn(format="%.1f"),
+                                    "Efecto esperado (pp)": st.column_config.NumberColumn(format="%.2f"),
+                                    "Votantes extra": st.column_config.NumberColumn(format="%.1f"),
+                                    "Costo": st.column_config.NumberColumn(format="%.1f"),
+                                    "Utilidad": st.column_config.NumberColumn(format="%.3f")})
+        st.caption("Efecto esperado = efecto máximo de la medida × min(1, aporte ÷ 4 pp), a la mitad si es la "
+                   "2ª causa · Votantes extra = lista nominal × efecto ÷ 100 · Utilidad = votantes extra ÷ costo. "
+                   "Se muestran hasta 2,000 filas.")
+        st.download_button("⬇️ Descargar plan (CSV)", tabla.to_csv(index=False).encode("utf-8"),
                            f"plan_intervencion_{anio}.csv", "text/csv")
+
+        # ---- Razonamiento de una sección
+        st.markdown("#### Sigue el razonamiento del agente en una sección")
+        orden = plan.drop_duplicates(CLAVE).head(1000)
+        sel_claves = set(map(tuple, sel[CLAVE].to_numpy().tolist()))
+        opciones_a = list(map(tuple, orden[CLAVE].to_numpy().tolist()))
+        clave_s = st.selectbox(
+            "Sección (en orden de prioridad)", opciones_a,
+            format_func=lambda c: f"{'✅' if c in sel_claves else '❌'} {ENTIDADES[int(c[0])]} · sección {int(c[1])}")
+        fila_a = vista[(vista["EDOCVE"] == clave_s[0]) & (vista["SECCION"] == clave_s[1])]
+        if len(fila_a):
+            traza_agente(fila_a.iloc[0], plan, pct)
 
 # --------------------------------------------------------------------------
 # Modelo
@@ -811,7 +1010,9 @@ if pantalla == VISTAS[5]:
     if met is None:
         st.info("No hay métricas (riesgo_metricas.json).")
     else:
-        st.markdown(f"**Modelo elegido:** `{met.get('modelo_elegido')}` — {met.get('criterio', '')}")
+        criterio = met.get("criterio") or (f"menor {met['metrica_seleccion']} en la validación de 2021"
+                                           if met.get("metrica_seleccion") else "")
+        st.markdown(f"**Modelo elegido:** `{met.get('modelo_elegido')}` — {criterio}")
         cols = ["MAE_pp", "MAE_rel_pp", "MAE_dentro_estado_pp", "RMSE_pp", "sesgo_pp",
                 "spearman", "precision_top10"]
         # Compatible con ambos formatos de salida de src.risk_model

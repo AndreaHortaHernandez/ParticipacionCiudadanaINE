@@ -1,0 +1,130 @@
+{
+  "presupuesto": 1249210.99,
+  "costo_total_candidatas": 12492109.85,
+  "costo_usado": 1249042.18,
+  "acciones": 13751,
+  "secciones_intervenidas": 13724,
+  "ciudadanos_alcanzados": 20585702,
+  "votantes_adicionales_esperados": 162781.0,
+  "por_medida": [
+    {
+      "medida": "campania_intermedias",
+      "acciones": 9714,
+      "votantes": 94673.38,
+      "costo": 733188.5,
+      "nombre": "Campaña sobre la importancia de las elecciones intermedias"
+    },
+    {
+      "medida": "brigadas_casa_por_casa",
+      "acciones": 1901,
+      "votantes": 35679.07,
+      "costo": 270882.0,
+      "nombre": "Brigadas casa por casa para recuperar votantes"
+    },
+    {
+      "medida": "accesibilidad_mayores",
+      "acciones": 2000,
+      "votantes": 31130.86,
+      "costo": 235103.3,
+      "nombre": "Accesibilidad de casillas y acompañamiento a personas mayores"
+    },
+    {
+      "medida": "programa_jovenes",
+      "acciones": 98,
+      "votantes": 635.65,
+      "costo": 5520.2,
+      "nombre": "Programa para jóvenes en escuelas, universidades y redes"
+    },
+    {
+      "medida": "acceso_territorial",
+      "acciones": 15,
+      "votantes": 479.11,
+      "costo": 3304.59,
+      "nombre": "Ubicación de casillas, traslado y orientación a nuevos residentes"
+    },
+    {
+      "medida": "diagnostico_participativo",
+      "acciones": 11,
+      "votantes": 149.52,
+      "costo": 758.78,
+      "nombre": "Diagnóstico participativo y reuniones vecinales (causa por identificar)"
+    },
+    {
+      "medida": "enfoque_genero",
+      "acciones": 12,
+      "votantes": 33.22,
+      "costo": 284.8,
+      "nombre": "Campaña con enfoque de género y apoyo en tareas de cuidado"
+    }
+  ],
+  "anio": 2027,
+  "presupuesto_pct": 10.0,
+  "supuestos": {
+    "escala_pp": 4.0,
+    "rendimiento_segunda": 0.5,
+    "factores_base": [
+      "historial_bajo",
+      "contexto_municipal",
+      "contexto_estatal",
+      "calidad_dato"
+    ],
+    "catalogo": {
+      "campania_intermedias": {
+        "nombre": "Campaña sobre la importancia de las elecciones intermedias",
+        "factor": "desmovilizacion_intermedias",
+        "efecto_max_pp": 1.5,
+        "costo_fijo": 5.0,
+        "costo_por_ciudadano": 0.05
+      },
+      "brigadas_casa_por_casa": {
+        "nombre": "Brigadas casa por casa para recuperar votantes",
+        "factor": "caida_reciente",
+        "efecto_max_pp": 3.0,
+        "costo_fijo": 15.0,
+        "costo_por_ciudadano": 0.1
+      },
+      "recordatorios": {
+        "nombre": "Recordatorios cercanos a la jornada (SMS, redes, perifoneo)",
+        "factor": "volatilidad",
+        "efecto_max_pp": 0.8,
+        "costo_fijo": 2.0,
+        "costo_por_ciudadano": 0.03
+      },
+      "programa_jovenes": {
+        "nombre": "Programa para jóvenes en escuelas, universidades y redes",
+        "factor": "jovenes",
+        "efecto_max_pp": 2.0,
+        "costo_fijo": 8.0,
+        "costo_por_ciudadano": 0.07
+      },
+      "accesibilidad_mayores": {
+        "nombre": "Accesibilidad de casillas y acompañamiento a personas mayores",
+        "factor": "envejecimiento",
+        "efecto_max_pp": 1.5,
+        "costo_fijo": 8.0,
+        "costo_por_ciudadano": 0.05
+      },
+      "enfoque_genero": {
+        "nombre": "Campaña con enfoque de género y apoyo en tareas de cuidado",
+        "factor": "genero",
+        "efecto_max_pp": 1.0,
+        "costo_fijo": 5.0,
+        "costo_por_ciudadano": 0.035
+      },
+      "acceso_territorial": {
+        "nombre": "Ubicación de casillas, traslado y orientación a nuevos residentes",
+        "factor": "territorio_acceso",
+        "efecto_max_pp": 2.0,
+        "costo_fijo": 12.0,
+        "costo_por_ciudadano": 0.07
+      },
+      "diagnostico_participativo": {
+        "nombre": "Diagnóstico participativo y reuniones vecinales (causa por identificar)",
+        "factor": "inercia",
+        "efecto_max_pp": 2.0,
+        "costo_fijo": 12.0,
+        "costo_por_ciudadano": 0.07
+      }
+    }
+  }
+}
