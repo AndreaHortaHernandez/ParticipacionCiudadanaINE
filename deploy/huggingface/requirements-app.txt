@@ -1,0 +1,10 @@
+# Solo lo que necesita la app (sin SHAP ni geopandas, que son del entrenamiento).
+# Mismas versiones con las que se probó la app.
+pandas==2.3.3
+numpy==2.2.6
+pyarrow==26.0.1
+plotly==7.1.0
+streamlit==1.67.0
+scikit-learn==1.7.2
+scipy==1.17.1
+joblib==1.6.0
