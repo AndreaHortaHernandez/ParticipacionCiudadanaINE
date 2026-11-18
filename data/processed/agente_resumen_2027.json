@@ -1,59 +1,59 @@
 {
-  "presupuesto": 1249210.99,
-  "costo_total_candidatas": 12492109.85,
-  "costo_usado": 1249042.18,
-  "acciones": 13751,
-  "secciones_intervenidas": 13724,
-  "ciudadanos_alcanzados": 20585702,
-  "votantes_adicionales_esperados": 162781.0,
+  "presupuesto": 1297536.64,
+  "costo_total_candidatas": 12975366.45,
+  "costo_usado": 1297432.4,
+  "acciones": 14472,
+  "secciones_intervenidas": 14397,
+  "ciudadanos_alcanzados": 20026402,
+  "votantes_adicionales_esperados": 218645.0,
   "por_medida": [
     {
       "medida": "campania_intermedias",
-      "acciones": 9714,
-      "votantes": 94673.38,
-      "costo": 733188.5,
+      "acciones": 9854,
+      "votantes": 121213.93,
+      "costo": 709605.35,
       "nombre": "Campaña sobre la importancia de las elecciones intermedias"
     },
     {
       "medida": "brigadas_casa_por_casa",
-      "acciones": 1901,
-      "votantes": 35679.07,
-      "costo": 270882.0,
+      "acciones": 2923,
+      "votantes": 69834.43,
+      "costo": 405754.0,
       "nombre": "Brigadas casa por casa para recuperar votantes"
     },
     {
       "medida": "accesibilidad_mayores",
-      "acciones": 2000,
-      "votantes": 31130.86,
-      "costo": 235103.3,
+      "acciones": 1545,
+      "votantes": 26030.73,
+      "costo": 172060.25,
       "nombre": "Accesibilidad de casillas y acompañamiento a personas mayores"
     },
     {
       "medida": "programa_jovenes",
-      "acciones": 98,
-      "votantes": 635.65,
-      "costo": 5520.2,
+      "acciones": 118,
+      "votantes": 907.17,
+      "costo": 6691.91,
       "nombre": "Programa para jóvenes en escuelas, universidades y redes"
     },
     {
       "medida": "acceso_territorial",
-      "acciones": 15,
-      "votantes": 479.11,
-      "costo": 3304.59,
+      "acciones": 11,
+      "votantes": 397.86,
+      "costo": 2029.42,
       "nombre": "Ubicación de casillas, traslado y orientación a nuevos residentes"
     },
     {
       "medida": "diagnostico_participativo",
-      "acciones": 11,
-      "votantes": 149.52,
-      "costo": 758.78,
+      "acciones": 15,
+      "votantes": 237.15,
+      "costo": 1122.69,
       "nombre": "Diagnóstico participativo y reuniones vecinales (causa por identificar)"
     },
     {
       "medida": "enfoque_genero",
-      "acciones": 12,
-      "votantes": 33.22,
-      "costo": 284.8,
+      "acciones": 6,
+      "votantes": 24.09,
+      "costo": 168.78,
       "nombre": "Campaña con enfoque de género y apoyo en tareas de cuidado"
     }
   ],
@@ -65,6 +65,7 @@
     "factores_base": [
       "historial_bajo",
       "contexto_municipal",
+      "contexto_vecinal",
       "contexto_estatal",
       "calidad_dato"
     ],

@@ -56,17 +56,44 @@ K-Means (k = 5) sobre indicadores históricos: nivel de participación relativo 
 - **Intervalos de 80%:** Gradient Boosting por cuantiles con calibración conformal, usando un año no visto del mismo tipo de elección.
 - **SHAP** descompone el riesgo de cada sección en factores interpretables.
 
-**Métricas de la corrida anterior** (se actualizan al correr `colab_reentrenar_modelo.ipynb`; completas en [`data/processed/riesgo_metricas.json`](data/processed/riesgo_metricas.json) y en la vista ⚙️ Modelo de la app). Error medio = MAE de la participación en puntos porcentuales; correlación de rangos = Spearman entre riesgo predicho y real; top 10% = fracción del 10% de secciones con más abstención real que el modelo pone en su 10% de mayor riesgo.
+**Métricas** (completas en [`data/processed/riesgo_metricas.json`](data/processed/riesgo_metricas.json) y en la vista ⚙️ Modelo de la app). Todas en puntos porcentuales (pp) salvo las de ranking:
+- **Error del dónde:** MAE de la participación *relativa al nivel nacional*. Es lo que aprende el modelo.
+- **Error total:** MAE de la participación. Suma además el error del supuesto nacional, igual para todas las secciones: −4.8 pp en 2021 y +2.7 pp en 2024.
+- **Corr. de rangos:** Spearman entre riesgo predicho y real.
+- **Top 10%:** fracción del 10% de secciones con más abstención real que el modelo pone en su 10% de mayor riesgo. **AUC top 10%:** qué tan bien separa ese grupo del resto (0.5 = azar).
 
-| Modelo | Validación 2021: error (pp) | Prueba 2024: error (pp) | Prueba 2024: corr. de rangos | Prueba 2024: top 10% |
-|---|---|---|---|---|
-| **Ensamble lineal + Gradient Boosting (elegido)** | **6.69** | **4.39** | **0.85** | **0.60** |
-| Lineal regularizado | 6.83 | 5.14 | 0.82 | 0.56 |
-| Gradient Boosting | 6.98 | 4.28 | 0.85 | 0.61 |
-| Baseline: repetir la elección comparable anterior | 9.75 | 4.95 | 0.82 | 0.62 |
-| Baseline: repetir la elección anterior | 8.13 | 7.13 | 0.73 | 0.61 |
+**Validación 2021** (con esta se elige: es intermedia, como 2027, y su entrenamiento incluye una presidencial):
 
-> El modelo se elige solo con la validación de 2021 (menor error) y después se mide una única vez en 2024, que no vio. Frente al baseline más fuerte, en 2024 reduce el error (4.39 vs 4.95 pp) y ordena mejor las secciones (0.85 vs 0.82), pero no identifica mejor el 10% de mayor riesgo (0.60 vs 0.62).
+| Modelo | Error del dónde | Error total | Corr. de rangos | Top 10% | AUC top 10% |
+|---|---|---|---|---|---|
+| **Ensamble: 90% Lasso + 10% Gradient Boosting (elegido)** | **6.53** | 6.98 | **0.75** | 0.55 | 0.89 |
+| Lasso | 6.54 | 7.09 | 0.74 | 0.55 | 0.89 |
+| Ridge | 6.60 | 6.85 | 0.74 | 0.56 | 0.89 |
+| Gradient Boosting | 7.29 | 6.95 | 0.72 | 0.48 | 0.86 |
+| Baseline: repetir la elección comparable (2015) | 8.73 | 9.75 | 0.60 | 0.45 | 0.84 |
+| Baseline: repetir la elección anterior (2018) | 6.31 | 8.13 | 0.76 | 0.62 | 0.92 |
+
+**Prueba 2024** (presidencial, no se usó para elegir nada):
+
+| Modelo | Error del dónde | Error total | Corr. de rangos | Top 10% | AUC top 10% |
+|---|---|---|---|---|---|
+| **Ensamble (elegido)** | 5.72 | 4.99 | 0.82 | 0.57 | 0.91 |
+| Lasso | 5.93 | 5.18 | 0.82 | 0.56 | 0.91 |
+| Ridge | 5.94 | 5.18 | 0.82 | 0.56 | 0.91 |
+| Gradient Boosting | **4.51** | **4.32** | **0.85** | 0.61 | 0.93 |
+| Clasificador de riesgo alto | — | — | — | 0.59 | **0.93** |
+| Baseline: repetir la elección comparable (2018) | 4.62 | 4.95 | 0.82 | **0.62** | 0.93 |
+| Baseline: repetir la elección anterior (2021) | 6.61 | 7.13 | 0.73 | 0.61 | 0.91 |
+
+**Lectura honesta:**
+- **El historial de cada sección explica casi todo.** Ningún modelo le gana de forma consistente a repetir una elección pasada: en 2021 el mejor baseline es la elección anterior y en 2024 la comparable. Los modelos combinan ambas y quedan cerca del mejor de los dos sin saber de antemano cuál será.
+- **Por qué no se eligió Gradient Boosting.** En 2024 fue el mejor modelo, pero en 2021, la elección del mismo tipo que 2027, fue el peor. Elegirlo viendo 2024 invalidaría la prueba. Con una sola elección de validación por tipo, esta incertidumbre no se puede resolver con estos datos.
+- **Qué se probó y no mejoró.** Promediar el pliegue 2018 para elegir castigó a Gradient Boosting, porque ese pliegue entrena solo con una intermedia; ahora queda como referencia. Elegir la regla del nivel nacional con un solo año escogía "tendencia", que en 2024 fue peor; se fijó la comparable.
+- **Lo que sí aportó:**
+  - El **clasificador de riesgo alto** tiene el mejor AUC de 2024 (0.935).
+  - Los **intervalos** marcan dónde el pronóstico es más incierto.
+  - El **contexto vecinal** aporta en promedio 1.4 pp al riesgo según SHAP (8.º de 13 factores). Su efecto en las métricas no se aisló: no hubo una corrida igual sin esas variables.
+- **Intervalos de 80% (conservadores):** en 2024 cubrieron el 98% de las secciones, con un ancho medio de 25 pp. Se calibraron con el pliegue 2018, que es débil. Para 2027 se calibran con 2021 y salen más angostos: 22 pp de ancho medio (de 18 a 27 pp entre el 10% y el 90% de las secciones).
 
 ### 4. Agente de intervención (`src/agent.py`)
 Agente racional **basado en utilidad**:
@@ -74,7 +101,7 @@ Agente racional **basado en utilidad**:
 2. **Acción.** Cada causa tiene una medida específica (p. ej., caída reciente → brigadas casa por casa; jóvenes → programa en escuelas y redes). Tener menos elecciones locales concurrentes es igual en toda la entidad, así que se atiende con **una recomendación estatal** al OPLE.
 3. **Prioridad.** Ordena las acciones por votantes adicionales esperados por unidad de costo y las elige hasta agotar el presupuesto.
 
-Con un presupuesto del 10% del costo de todas las acciones posibles, para 2027 el agente elige **13,751 acciones** en **13,724 secciones** (20.6 millones de electores) y espera **≈163 mil votantes adicionales**. La medida más usada es la campaña sobre elecciones intermedias.
+Con un presupuesto del 10% del costo de todas las acciones posibles, para 2027 el agente elige **14,472 acciones** en **14,397 secciones** (20.0 millones de electores) y espera **≈219 mil votantes adicionales**. Las medidas más usadas son la campaña sobre elecciones intermedias (9,854 acciones) y las brigadas casa por casa (2,923).
 
 > **Supuesto importante:** los efectos y costos de las medidas son **ilustrativos** y están documentados en el código. El modelo identifica dónde y por qué hay riesgo; no estima efectos causales de las medidas.
 
