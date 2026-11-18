@@ -651,6 +651,39 @@ def pantalla_resultados(vista, datos, anio, zona, edo, mpio, pct):
 # --------------------------------------------------------------------------
 # Barra lateral
 # --------------------------------------------------------------------------
+RESULTADOS_URL = ("https://github.com/AndreaHortaHernandez/ParticipacionCiudadanaINE/"
+                  "releases/latest/download/resultados_para_colab.zip")
+
+
+@st.cache_resource(show_spinner="Primera vez: descargando los resultados del modelo (~160 MB, ~1 min)…")
+def asegurar_resultados() -> bool:
+    """En un servidor nuevo (p. ej. Streamlit Community Cloud) no hay data/processed:
+    se baja el zip del Release una sola vez por proceso. Desactivar con DESCARGAR_RESULTADOS=0."""
+    if any(os.path.exists(_ruta(f"riesgo_{a}.parquet")) for a in ANIOS):
+        return True
+    if os.environ.get("DESCARGAR_RESULTADOS", "1") != "1":
+        return False
+    import shutil
+    import tempfile
+    import urllib.request
+    import zipfile
+    with tempfile.TemporaryDirectory() as tmp:
+        z = os.path.join(tmp, "r.zip")
+        urllib.request.urlretrieve(RESULTADOS_URL, z)
+        zipfile.ZipFile(z).extractall(tmp)
+        origen = next((r for r, _, fs in os.walk(tmp) if "riesgo_2027.parquet" in fs), None)
+        if origen is None:
+            return False
+        os.makedirs(PROC_DIR, exist_ok=True)
+        shutil.copytree(origen, PROC_DIR, dirs_exist_ok=True)
+    return True
+
+
+try:
+    asegurar_resultados()
+except Exception as e:  # sin red o Release no disponible: se muestra el aviso de abajo
+    st.warning(f"No se pudieron descargar los resultados del Release: {e}")
+
 disponibles = [a for a in ANIOS if os.path.exists(_ruta(f"riesgo_{a}.parquet"))]
 if not disponibles:
     st.error("No hay salidas del modelo en data/processed/. Corre el pipeline en Colab "

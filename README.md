@@ -117,6 +117,9 @@ Con un presupuesto del 10% del costo de todas las acciones posibles, para 2027 e
 
 ## Cómo correrlo
 
+### App en línea (Streamlit Community Cloud, gratis)
+Se publica desde este repo con el punto de entrada [`deploy/streamlit/streamlit_app.py`](deploy/streamlit/streamlit_app.py), que trae dependencias ligeras. La primera vez que arranca, la app baja sola los resultados del [Release](https://github.com/AndreaHortaHernandez/ParticipacionCiudadanaINE/releases), en ~1–2 min. Para actualizarla basta con hacer push a `main` o subir un zip nuevo al Release y reiniciar la app (*Manage app → Reboot*). [`deploy/huggingface/`](deploy/huggingface/) tiene la alternativa con Docker.
+
 ### Opción A · App rápida en Colab (sin reentrenar)
 1. Abre el notebook en Colab: <https://colab.research.google.com/github/AndreaHortaHernandez/ParticipacionCiudadanaINE/blob/main/notebooks/colab_app_rapida.ipynb>
 2. *Entorno de ejecución → Ejecutar todas*. Descarga solo los resultados y la cartografía del [Release](https://github.com/AndreaHortaHernandez/ParticipacionCiudadanaINE/releases) (~3 min si el Release trae `geo.zip`; ~10 min si tiene que procesar los mapas).
